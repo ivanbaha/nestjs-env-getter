@@ -1,0 +1,36 @@
+{
+    "name": "@dmp-backend/env-getter",
+    "version": "0.2.0",
+    "description": "Environment variables getter",
+    "author": "Ericsson, BNEW SAN Tools - DMP",
+    "private": false,
+    "publishConfig": {
+        "registry": "https://arm.seli.gic.ericsson.se/artifactory/api/npm/proj-sant-dmp-npm-local/"
+    },
+    "main": "dist/index.js",
+    "types": "dist/index.d.ts",
+    "files": [
+        "dist/index.js",
+        "dist/index.d.ts"
+    ],
+    "repository": {
+        "type": "git",
+        "url": "git@gitlab.internal.ericsson.com:san-tools-technology-platform/nro-devops/deployment-marketplace/packages/dmp-common-backend.git"
+    },
+    "license": "UNLICENSED",
+    "scripts": {
+        "start": "tsc --p tsconfig.dev.json -w",
+        "prebuild": "rimraf dist",
+        "build": "rollup -c",
+        "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
+        "lint": "eslint \"{src,apps,libs,test}/**/*.ts\" --fix",
+        "lint-report": "eslint-output",
+        "test": "jest",
+        "test-report": "jest --ci --reporters=default --reporters=jest-junit --reporters=jest-sonar --coverage --runInBand",
+        "typecheck": "tsc --p tsconfig.build.json --noEmit",
+        "lint-staged": "lint-staged --allow-empty"
+    },
+    "dependencies": {
+        "dotenv": "^16.0.2"
+    }
+}
