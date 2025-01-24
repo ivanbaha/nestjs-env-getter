@@ -25,8 +25,8 @@ export class EnvService {
     if (!envVal || !allowedValues.includes(envVal))
       this.throwError(
         `Environment variable '${envName}' can be only one of: ${JSON.stringify(
-          allowedValues
-        )}, but received '${envVal}'`
+          allowedValues,
+        )}, but received '${envVal}'`,
       );
   }
 
@@ -69,7 +69,7 @@ export class EnvService {
   getOptionalEnv(
     envName: string,
     defaultValueOrAllowedValues?: string | string[],
-    allowedValues?: string[]
+    allowedValues?: string[],
   ): string | undefined {
     if (Array.isArray(defaultValueOrAllowedValues)) {
       const envValue = process.env[envName];
@@ -208,15 +208,15 @@ export class EnvService {
   parseArrayFromEnv<R = any>(envName: string): R extends any[] ? R : R[];
   parseArrayFromEnv<R = any>(
     envName: string,
-    validationOptions: { optional: true; validate?: ArrayValidatorType<R> }
+    validationOptions: { optional: true; validate?: ArrayValidatorType<R> },
   ): (R extends any[] ? R : R[]) | undefined;
   parseArrayFromEnv<R = any>(
     envName: string,
-    validationOptions: { optional?: false | undefined; validate?: ArrayValidatorType<R> }
+    validationOptions: { optional?: false | undefined; validate?: ArrayValidatorType<R> },
   ): R extends any[] ? R : R[];
   parseArrayFromEnv<R = any>(
     envName: string,
-    validationOptions?: { optional?: boolean; validate?: ArrayValidatorType<R> }
+    validationOptions?: { optional?: boolean; validate?: ArrayValidatorType<R> },
   ): (R extends any[] ? R : R[]) | undefined {
     if (validationOptions?.optional && !this.isEnvSet(envName)) return;
 
@@ -242,7 +242,7 @@ export class EnvService {
           this.throwError(
             `The validation func of EnvService.parseArrayFromEnv('${envName}') must return either boolean or string\nTrace ${
               new Error().stack
-            }`
+            }`,
           );
 
         // validate element
@@ -269,7 +269,7 @@ export class EnvService {
 
     if (!/^\d+ *[(?=.*s)(?=.*m)(?=.*h)(?=.*d)]{0,1}$/i.test(val))
       this.throwError(
-        `Variable '${envName}' is not in the acceptable format. It must be: <number><"ms"|"s"|"m"|"h"|"d">. Ex.: '12h', '2d', '2D', '2 d'`
+        `Variable '${envName}' is not in the acceptable format. It must be: <number><"ms"|"s"|"m"|"h"|"d">. Ex.: '12h', '2d', '2D', '2 d'`,
       );
 
     const [, numb, pointer] = /^(\d+) *([(?=.*s)(?=.*m)(?=.*h)(?=.*d)]{0,1})$/i.exec(val) ?? [];
@@ -319,6 +319,7 @@ export class EnvService {
   getOptionalURL(envName: string, defaultValue: string): string;
   getOptionalURL(envName: string, defaultValue?: string): string | undefined {
     const envVal = this.getOptionalEnv(envName) ?? defaultValue;
+    console.log("booo");
 
     try {
       return envVal ? new URL(envVal).href : undefined;

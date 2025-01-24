@@ -1,18 +1,26 @@
-import pluginJs from "@eslint/js";
+import js from "@eslint/js";
 import jsdoc from "eslint-plugin-jsdoc";
+import prettier from "eslint-plugin-prettier/recommended";
 import globals from "globals";
 import tseslint from "typescript-eslint";
 
 /** @type {import('eslint').Linter.Config[]} */
 export default [
+  js.configs.recommended,
+  ...tseslint.configs.recommended,
+  prettier,
+  jsdoc.configs["flat/recommended"],
   {
     files: ["**/*.{js,mjs,cjs,ts}"],
-    ignores: ["node_modules/", "dist/"],
+
     plugins: {
       jsdoc,
     },
+
     rules: {
-      "jsdoc/check-alignment": ["warn", "always"],
+      "no-console": "warn",
+
+      "jsdoc/check-alignment": "warn",
       "jsdoc/require-description": "warn",
       "jsdoc/require-description-complete-sentence": "warn",
       "jsdoc/require-param": "warn",
@@ -28,7 +36,8 @@ export default [
       "jsdoc/newline-after-description": "off",
     },
   },
-  { languageOptions: { globals: globals.browser } },
-  pluginJs.configs.recommended,
-  ...tseslint.configs.recommended,
+  { languageOptions: { globals: globals.node } },
+  {
+    ignores: ["node_modules/", "dist/"],
+  },
 ];
