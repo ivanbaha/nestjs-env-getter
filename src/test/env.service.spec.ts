@@ -1,6 +1,7 @@
 import type { TestingModule } from "@nestjs/testing";
 import { Test } from "@nestjs/testing";
 import { EnvModule, EnvService } from "..";
+import { SKIP_ENV, SKIP_REQUIRED_ENVS_VAR } from "../env.const";
 
 describe("Env Service", () => {
   let envService: EnvService;
@@ -14,31 +15,47 @@ describe("Env Service", () => {
     envService = app.get<EnvService>(EnvService);
   });
 
+  afterEach(() => {
+    jest.clearAllMocks();
+  });
+
   it("should check env", () => {
     expect(envService.isEnvSet("TEST_STRING_ENV")).toBe(true);
   });
 
   it("should get required string env", () => {
     expect(envService.getRequiredEnv("TEST_STRING_ENV")).toBe("test-string");
+    expect(envService.getRequiredEnv("TEST_STRING_ENV", ["test-string", "test"])).toBe("test-string");
   });
 
   it("should get optional string env", () => {
     expect(envService.getOptionalEnv("TEST_STRING_ENV", "default-value")).toBe("test-string");
     expect(envService.getOptionalEnv("TEST_STRING_ENV_UNSET", "default-value")).toBe("default-value");
+    expect(envService.getOptionalEnv("TEST_STRING_ENV", ["test-string", "test"])).toBe("test-string");
+    expect(envService.getOptionalEnv("TEST_STRING_ENV_UNSET", "default-value", ["test", "default-value"])).toBe(
+      "default-value"
+    );
   });
 
   it("should get numeric env", () => {
-    expect(envService.getRequiredNumericEnv("TEST_NUMBER_ENV")).toBe(555);
-    expect(envService.getNumericEnv("TEST_NUMBER_ENV", 333)).toBe(555);
+    expect(envService.getRequiredNumericEnv("TEST_NUMBER_ENV")).toBe(1555);
+    expect(envService.getNumericEnv("TEST_NUMBER_ENV", 333)).toBe(1555);
   });
 
   it("should return a default value because of wrong numeric env format", () => {
+    expect(envService.getNumericEnv("TEST_NUMBER_ENV_UNSET")).toBeUndefined();
     expect(envService.getNumericEnv("TEST_NUMBER_ENV_UNSET", 333)).toBe(333);
     expect(envService.getNumericEnv("TEST_STRING_ENV", 333)).toBe(333);
   });
 
   it("should return boolean env", () => {
     expect(envService.getBooleanEnv("TEST_BOOLEAN_ENV")).toBe(true);
+  });
+
+  it("should return optional boolean env", () => {
+    expect(envService.getOptionalBooleanEnv("TEST_BOOLEAN_ENV")).toBe(true);
+    expect(envService.getOptionalBooleanEnv("TEST_BOOLEAN_ENV_UNSET", true)).toBe(true);
+    expect(envService.getOptionalBooleanEnv("TEST_BOOLEAN_ENV_UNSET")).toBeUndefined();
   });
 
   it("should return required boolean env", () => {
@@ -51,6 +68,8 @@ describe("Env Service", () => {
     expect(envService.getRequiredEnv("TEST_STRING_ENV")).toBe("skip_variable");
     expect(envService.getRequiredNumericEnv("TEST_NUMBER_ENV")).toBe(1);
     expect(envService.getRequiredBooleanEnv("TEST_BOOLEAN_ENV")).toBe(false);
+
+    process.env.SKIP_REQUIRED_ENVS = undefined;
   });
 
   it("should get time period env", () => {
@@ -77,4 +96,93 @@ describe("Env Service", () => {
     expect(envService.getTimePeriod("TEST_TIME_PERIOD_DAY_ENV", "1000", "m")).toBe(7_200);
     expect(envService.getTimePeriod("TEST_TIME_PERIOD_DAY_ENV", "1000", "h")).toBe(120);
   });
+
+  it("should get required URL env", () => {
+    expect(envService.getRequiredURL("TEST_VALID_URL_ENV")).toBe("http://booboo.com/");
+
+    // skip envs flow
+    process.env[SKIP_REQUIRED_ENVS_VAR] = "true";
+    const res = envService.getRequiredURL("UNSET_ENV");
+    expect(res).toBe(`http://${SKIP_ENV}.com`);
+    process.env[SKIP_REQUIRED_ENVS_VAR] = undefined;
+  });
+
+  it("should exit with error message during getting required URL env", () => {
+    const exit = jest.spyOn(process, "exit").mockImplementation(() => {
+      throw new Error();
+    });
+
+    // unset Env
+    try {
+      envService.getRequiredURL("UNSET_ENV");
+    } catch (_) {}
+    // invalid value
+    try {
+      envService.getRequiredURL("TEST_INVALID_URL_ENV");
+    } catch (_) {}
+
+    expect(exit).toHaveBeenCalledTimes(2);
+  });
+
+  it("should get optional URL env", () => {
+    expect(envService.getOptionalURL("UNSET_ENV")).toBe(undefined);
+    expect(envService.getOptionalURL("TEST_VALID_URL_ENV")).toBe("http://booboo.com/");
+    expect(envService.getOptionalURL("UNSET_ENV", "http://default.url")).toBe("http://default.url/");
+  });
+
+  it("should exit with error message during getting optional URL env", () => {
+    const exit = jest.spyOn(process, "exit").mockImplementation(() => {
+      throw new Error();
+    });
+
+    try {
+      envService.getOptionalURL("TEST_INVALID_URL_ENV");
+    } catch (_) {}
+    try {
+      envService.getOptionalURL("UNSET_URL", "invalid def url");
+    } catch (_) {}
+
+    expect(exit).toHaveBeenCalledTimes(2);
+  });
+
+  it("should exit with error message during getting required env", () => {
+    const exit = jest.spyOn(process, "exit").mockImplementation(() => {
+      throw new Error();
+    });
+
+    // not allowed value
+    try {
+      envService.getRequiredEnv("TEST_STRING_ENV", ["test"]);
+    } catch (_) {}
+    // allowed values can't be an empty array
+    try {
+      envService.getOptionalEnv("TEST_STRING_ENV", []);
+    } catch (_) {}
+
+    expect(exit).toHaveBeenCalledTimes(2);
+  });
+
+  it("should exit with error message during getting optional env", () => {
+    const exit = jest.spyOn(process, "exit").mockImplementation(() => {
+      throw new Error();
+    });
+
+    // not allowed value
+    try {
+      envService.getOptionalEnv("TEST_STRING_ENV", ["test"]);
+    } catch (_) {}
+    // allowed values can't be an empty array
+    try {
+      envService.getOptionalEnv("TEST_STRING_ENV", []);
+    } catch (_) {}
+    // default value is not from allowed values list
+    try {
+      envService.getOptionalEnv("TEST_STRING_ENV_UNSET", "test_string", ["test"]);
+    } catch (_) {}
+
+    expect(exit).toHaveBeenCalledTimes(3);
+  });
+
+  // TODO: write test cases for parseObjectFromEnv
+  // TODO: write test cases for parseArrayFromEnv 😆
 });
