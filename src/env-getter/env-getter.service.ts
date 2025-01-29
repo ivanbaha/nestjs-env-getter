@@ -1,9 +1,9 @@
 import { Injectable } from "@nestjs/common";
 import { config } from "dotenv";
-import { ClassConstructor, TimeFormat, type ArrayValidatorType } from "./types";
+import { isTimePeriod, parseTimePeriod, type ClassConstructor, type TimeMarker } from "../shared";
 
 @Injectable()
-export class EnvService {
+export class EnvGetterService {
   constructor() {
     config();
   }
@@ -177,36 +177,30 @@ export class EnvService {
   }
 
   /**
-   * Converts a Time Period value from an Env into number according to "outTimeIn" option.
-   * Input value must be in format: <number><timeFormat>, where 'timeFormat' is one of: "ms" | "s" | "m" | "h" | "d".
-   * "timeFormat" is optional and has default value "ms".
-   * @param envName - The name of the environment variable.
-   * @param defaultValue - The default time period in the acceptable format.
-   * @param outTimeIn - The default time period in the acceptable format. [Default: "ms"].
-   * @returns - The numbered time period.
+   * Retrieves and parses an optional time period from an environment variable.
+   * - If the environment variable is not set, it falls back to the provided default value.
+   * - Validates that the value is in the acceptable format: `<number><"ms"|"s"|"m"|"h"|"d">`.
+   * - Converts the value to the specified time format.
+   * - Terminates the process if the value is invalid.
+   * @param envName - The name of the environment variable to retrieve.
+   * @param defaultValue - The default time period to use if the environment variable is not set.
+   * @param resultIn - The desired time unit for the result (default is `"ms"`).
+   * @returns The parsed time period converted to the specified unit.
+   * @throws Will stop the process if the environment variable or default value is invalid.
    */
-  getOptionalTimePeriod(envName: string, defaultValue: string, outTimeIn: TimeFormat = "ms"): number {
-    const val = process.env[envName] || defaultValue;
+  getOptionalTimePeriod(envName: string, defaultValue: string, resultIn: TimeMarker = "ms"): number {
+    const baseErrorMessage = `'${envName}' is not in the acceptable format. It must be: <number><"ms"|"s"|"m"|"h"|"d">. Ex.: '12h', '2d', '2D', '2 d'`;
 
-    if (!/^\d+ *[(?=.*s)(?=.*m)(?=.*h)(?=.*d)]{0,1}$/i.test(val))
-      this.stopProcess(
-        `Variable '${envName}' is not in the acceptable format. It must be: <number><"ms"|"s"|"m"|"h"|"d">. Ex.: '12h', '2d', '2D', '2 d'`,
-      );
+    // validating the default value
+    if (!isTimePeriod(defaultValue))
+      this.stopProcess(`The default value for the environment variable ${baseErrorMessage}`);
 
-    const [, numb, pointer] = /^(\d+) *([(?=.*s)(?=.*m)(?=.*h)(?=.*d)]{0,1})$/i.exec(val) ?? [];
-    const timePointer = (pointer?.toLowerCase() || "ms") as TimeFormat;
+    const envVal = process.env[envName];
 
-    const mapper: Record<TimeFormat, number> = {
-      ms: 1,
-      s: 1_000,
-      m: 60_000,
-      h: 3_600_000,
-      d: 86_400_000,
-    };
+    // validating the ENV value
+    if (envVal && !isTimePeriod(envVal)) this.stopProcess(`Variable ${baseErrorMessage}`);
 
-    const multiplier = outTimeIn === timePointer ? 1 : mapper[timePointer] / mapper[outTimeIn];
-
-    return Number(numb) * multiplier;
+    return parseTimePeriod(envVal ?? defaultValue, resultIn);
   }
 
   /**

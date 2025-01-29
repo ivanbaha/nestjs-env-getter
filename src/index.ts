@@ -1,4 +1,4 @@
-export { EnvModule } from "./env.module";
-export { EnvService } from "./env.service";
+export { EnvModule } from "./env-getter/env-getter.module";
+export { EnvService } from "./env-getter/env-getter.service";
 
-export * from "./types";
+export * from "./shared/types";

@@ -1,19 +1,16 @@
 /* eslint-disable no-empty */
-import type { TestingModule } from "@nestjs/testing";
-import { Test } from "@nestjs/testing";
-import { EnvModule, EnvService } from "..";
-import { SKIP_ENV, SKIP_REQUIRED_ENVS_VAR } from "../env.const";
+import { Test, type TestingModule } from "@nestjs/testing";
+import { EnvGetterService } from "../env-getter.service";
 
-describe("Env Service", () => {
-  let envService: EnvService;
+describe("Env Getter Service", () => {
+  let envService: EnvGetterService;
 
   beforeEach(async () => {
     const app: TestingModule = await Test.createTestingModule({
-      imports: [EnvModule],
-      providers: [EnvService],
+      providers: [EnvGetterService],
     }).compile();
 
-    envService = app.get<EnvService>(EnvService);
+    envService = app.get<EnvGetterService>(EnvGetterService);
   });
 
   afterEach(() => {

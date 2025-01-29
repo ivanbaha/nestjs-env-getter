@@ -8,5 +8,5 @@ module.exports = {
   collectCoverageFrom: ["**/*.ts"],
   coverageDirectory: "../coverage",
   testEnvironment: "node",
-  setupFiles: ["<rootDir>/test/mockEnvs.ts"],
+  setupFiles: ["<rootDir>/test-utils/envs.mock.ts"],
 };
