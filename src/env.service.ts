@@ -1,29 +1,29 @@
 import { Injectable } from "@nestjs/common";
-import * as dotenv from "dotenv";
-import { SKIP_ENV, SKIP_REQUIRED_ENVS_VAR } from "./env.const";
+import { config } from "dotenv";
 import { ClassConstructor, TimeFormat, type ArrayValidatorType } from "./types";
 
 @Injectable()
 export class EnvService {
   constructor() {
-    dotenv.config();
+    config();
   }
 
-  private throwError(message: string): never {
+  private stopProcess(message: string): never {
+    // eslint-disable no-console
     console.log("\x1b[31m%s\x1b[0m", message);
     process.exit(1);
   }
 
   private checkEnvExisting(envName: string): boolean {
-    if (!process.env.hasOwnProperty(envName)) this.throwError(`Missing '${envName}' environment variable`);
+    if (!process.env.hasOwnProperty(envName)) this.stopProcess(`Missing '${envName}' environment variable`);
     return true;
   }
 
   private checkIfEnvHasAllowedValue(envName: string, envVal?: string, allowedValues?: string[]): void | never {
-    if (!allowedValues?.length) this.throwError(`You didn't specify allowed values for variable ${envName}`);
+    if (!allowedValues?.length) this.stopProcess(`You didn't specify allowed values for variable ${envName}`);
 
     if (!envVal || !allowedValues.includes(envVal))
-      this.throwError(
+      this.stopProcess(
         `Environment variable '${envName}' can be only one of: ${JSON.stringify(
           allowedValues,
         )}, but received '${envVal}'`,
@@ -31,8 +31,9 @@ export class EnvService {
   }
 
   /**
-   * Check if variable is set. Returns true if it's set or false if it's not.
+   * Checks if variable is set.
    * @param envName - The name of the environment variable.
+   * @returns True if it's set or false if it's not.
    */
   isEnvSet(envName: string): boolean {
     return process.env.hasOwnProperty(envName);
@@ -47,8 +48,6 @@ export class EnvService {
   getRequiredEnv(envName: string): string;
   getRequiredEnv(envName: string, allowedValues: string[]): string;
   getRequiredEnv(envName: string, allowedValues?: string[]): string {
-    if (process.env[SKIP_REQUIRED_ENVS_VAR] === "true") return SKIP_ENV;
-
     this.checkEnvExisting(envName);
     if (allowedValues?.length) this.checkIfEnvHasAllowedValue(envName, process.env[envName], allowedValues);
 
@@ -98,20 +97,22 @@ export class EnvService {
   }
 
   /**
-   * Returns a decimal numeric value of the required environment variable.
+   * Retrieves a decimal numeric value of the required environment variable.
    * Throws an error if it is not set.
    * @param envName - The name of the environment variable.
+   * @returns Decimal numeric value of the required environment variable.
    */
   getRequiredNumericEnv(envName: string): number {
     const envVal = this.getRequiredEnv(envName);
     if (envVal === "skip_variable") return 1;
-    if (!/^[0-9_]+$/.test(envVal)) this.throwError(`Variable '${envName}' is not of number type.`);
+    if (!/^[0-9_]+$/.test(envVal)) this.stopProcess(`Variable '${envName}' is not of number type.`);
     return Number(envVal.replace("_", ""));
   }
 
   /**
-   * Returns true if environment variable was set and its value equals 'true'. Otherwise returns false.
+   * Retrieves the value of boolean environment variable.
    * @param envName - The name of the environment variable.
+   * @returns True if environment variable was set and its value equals 'true'. Otherwise returns false.
    */
   getBooleanEnv(envName: string): boolean {
     return process.env[envName] === "true";
@@ -120,7 +121,6 @@ export class EnvService {
   /**
    * Returns true if environment variable was set and its value equals 'true' or false if it has different value.
    * If the env isn't set default value will be returned.
-   *
    * @param envName - The name of the environment variable.
    */
   getOptionalBooleanEnv(envName: string): boolean | undefined;
@@ -137,14 +137,13 @@ export class EnvService {
   getRequiredBooleanEnv(envName: string): boolean {
     const envVal = this.getRequiredEnv(envName);
     if (envVal === "skip_variable") return false;
-    if (!/true|false/.test(envVal)) this.throwError(`Variable '${envName}' is not of boolean type.`);
+    if (!/true|false/.test(envVal)) this.stopProcess(`Variable '${envName}' is not of boolean type.`);
 
     return envVal === "true";
   }
 
   /**
    * Gets the value of the variable and parse it to an object.
-   *
    * @param envName - The name of the environment variable.
    * @param cls - The class for instantiating from the plain object parsed from the env.
    * @throws An error if variable is not set, it's impossible to parse, or the 'cls' throws validation error during instantiating.
@@ -157,7 +156,7 @@ export class EnvService {
     try {
       parsedObj = JSON.parse(envVal);
     } catch (error: any) {
-      this.throwError(`${baseErrorMessage} ${error.message}`);
+      this.stopProcess(`${baseErrorMessage} ${error.message}`);
     }
 
     if (!cls) return parsedObj as R;
@@ -165,13 +164,12 @@ export class EnvService {
     try {
       return new cls(parsedObj);
     } catch (error: any) {
-      this.throwError(`${baseErrorMessage} ${error.message}`);
+      this.stopProcess(`${baseErrorMessage} ${error.message}`);
     }
   }
 
   /**
    * Gets the value of the variable and parse it to an array.
-   *
    * @param envName - The name of the environment variable.
    * @param cls - The class for instantiating from the plain object parsed from the env.
    * @param validationOptions - Validation options.
@@ -227,10 +225,10 @@ export class EnvService {
     try {
       parsedArray = JSON.parse(envVal);
     } catch (error: any) {
-      this.throwError(`${baseErrorMessage} ${error.message}`);
+      this.stopProcess(`${baseErrorMessage} ${error.message}`);
     }
 
-    if (!Array.isArray(parsedArray)) this.throwError(`'${envName}' must be a stringified array`);
+    if (!Array.isArray(parsedArray)) this.stopProcess(`'${envName}' must be a stringified array`);
 
     if (typeof validationOptions?.validate === "function") {
       // validate each element of parsed array
@@ -239,7 +237,7 @@ export class EnvService {
 
         // check if validator works correct
         if (!["boolean", "string"].includes(typeof result) || result === "")
-          this.throwError(
+          this.stopProcess(
             `The validation func of EnvService.parseArrayFromEnv('${envName}') must return either boolean or string\nTrace ${
               new Error().stack
             }`,
@@ -247,7 +245,7 @@ export class EnvService {
 
         // validate element
         if (result === false || (typeof result === "string" && result))
-          this.throwError(typeof result === "string" ? result : `'${envName}[${i}]' failed validation`);
+          this.stopProcess(typeof result === "string" ? result : `'${envName}[${i}]' failed validation`);
       });
     }
 
@@ -258,7 +256,6 @@ export class EnvService {
    * Converts a Time Period value from an Env into number according to "outTimeIn" option.
    * Input value must be in format: <number><timeFormat>, where 'timeFormat' is one of: "ms" | "s" | "m" | "h" | "d".
    * "timeFormat" is optional and has default value "ms".
-   *
    * @param envName - The name of the environment variable.
    * @param defaultValue - The default time period in the acceptable format.
    * @param outTimeIn - The default time period in the acceptable format. [Default: "ms"].
@@ -268,7 +265,7 @@ export class EnvService {
     const val = process.env[envName] || defaultValue;
 
     if (!/^\d+ *[(?=.*s)(?=.*m)(?=.*h)(?=.*d)]{0,1}$/i.test(val))
-      this.throwError(
+      this.stopProcess(
         `Variable '${envName}' is not in the acceptable format. It must be: <number><"ms"|"s"|"m"|"h"|"d">. Ex.: '12h', '2d', '2D', '2 d'`,
       );
 
@@ -291,7 +288,6 @@ export class EnvService {
   /**
    * Gets the URL Env.
    * Env value must be a valid URL string.
-   *
    * @param envName - The name of the environment variable.
    * @returns - The URL href string.
    */
@@ -304,14 +300,13 @@ export class EnvService {
     try {
       return new URL(envVal).href;
     } catch (_) {
-      this.throwError(`'${envName}' must be a valid URL`);
+      this.stopProcess(`'${envName}' must be a valid URL`);
     }
   }
 
   /**
    * Gets the URL from optional Env.
    * If the Env is unset undefined will be returned.
-   *
    * @param envName - The name of the environment variable.
    * @returns - The URL href from the Env or default value or undefined.
    */
@@ -324,7 +319,7 @@ export class EnvService {
     try {
       return envVal ? new URL(envVal).href : undefined;
     } catch (_) {
-      this.throwError(`'${envName}' must be a valid URL`);
+      this.stopProcess(`'${envName}' must be a valid URL`);
     }
   }
 }

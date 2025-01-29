@@ -1,3 +1,4 @@
+/* eslint-disable no-empty */
 import type { TestingModule } from "@nestjs/testing";
 import { Test } from "@nestjs/testing";
 import { EnvModule, EnvService } from "..";
@@ -33,7 +34,7 @@ describe("Env Service", () => {
     expect(envService.getOptionalEnv("TEST_STRING_ENV_UNSET", "default-value")).toBe("default-value");
     expect(envService.getOptionalEnv("TEST_STRING_ENV", ["test-string", "test"])).toBe("test-string");
     expect(envService.getOptionalEnv("TEST_STRING_ENV_UNSET", "default-value", ["test", "default-value"])).toBe(
-      "default-value"
+      "default-value",
     );
   });
 
