@@ -177,6 +177,29 @@ export class EnvGetterService {
   }
 
   /**
+   * Retrieves and parses a required time period from an environment variable.
+   * - Ensures the environment variable is set and retrieves its value.
+   * - Validates that the value follows the format: `<number><"ms"|"s"|"m"|"h"|"d">`.
+   * - Converts the value to the specified time format.
+   * - Terminates the process if the value is missing or invalid.
+   * @param envName - The name of the required environment variable.
+   * @param resultIn - The desired time unit for the result (default is `"ms"`).
+   * @returns The parsed time period converted to the specified unit.
+   * @throws Will stop the process if the environment variable is missing or has an invalid format.
+   */
+  getRequiredTimePeriod(envName: string, resultIn: TimeMarker = "ms") {
+    const envVal = this.getRequiredEnv(envName);
+
+    // validating the ENV value
+    if (!isTimePeriod(envVal))
+      this.stopProcess(
+        `Variable '${envName}' is not in the acceptable format. It must be: <number><"ms"|"s"|"m"|"h"|"d">. Ex.: '12h', '2d', '2D', '2 d'`,
+      );
+
+    return parseTimePeriod(envVal, resultIn);
+  }
+
+  /**
    * Retrieves and parses an optional time period from an environment variable.
    * - If the environment variable is not set, it falls back to the provided default value.
    * - Validates that the value is in the acceptable format: `<number><"ms"|"s"|"m"|"h"|"d">`.
