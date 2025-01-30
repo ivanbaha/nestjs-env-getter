@@ -268,12 +268,39 @@ export class EnvGetterService {
   }
 
   /**
-   * Gets the value of the variable and parse it to an object.
+   * Retrieves and parses a required environment variable as an object.
+   * - Ensures the environment variable is set.
+   * - Parses the value from a JSON string into an object.
+   * - Optionally validates and instantiates the object using a provided class.
+   * - Terminates the process if parsing fails or if instantiation using the class fails.
+   * @template R - The expected type of the parsed object.
    * @param envName - The name of the environment variable.
-   * @param cls - The class for instantiating from the plain object parsed from the env.
-   * @throws An error if variable is not set, it's impossible to parse, or the 'cls' throws validation error during instantiating.
+   * @param cls - (Optional) A class constructor to validate and instantiate the parsed object.
+   * @returns The parsed object, optionally instantiated as an instance of `cls`.
+   * @throws Terminates the process if the environment variable is missing, cannot be parsed, or fails validation.
+   * @example
+   * // Define a class for validation
+   * class Config {
+   *   apiKey: string;
+   *   timeout: number;
+   *
+   *   constructor(data: { apiKey: string; timeout: number }) {
+   *     if (!data.apiKey) throw new Error("apiKey is required");
+   *     if (typeof data.timeout !== "number") throw new Error("timeout must be a number");
+   *     this.apiKey = data.apiKey;
+   *     this.timeout = data.timeout;
+   *   }
+   * }
+   *
+   * // Set the environment variable (e.g., process.env.CONFIG = '{"apiKey": "123", "timeout": 5000"}')
+   * const config = getRequiredObject<Config>("CONFIG", Config);
+   * console.log(config.apiKey); // "123"
+   * console.log(config.timeout); // 5000
    */
-  getRequiredObject<R = any>(envName: string, cls?: ClassConstructor<R>): R {
+  getRequiredObject<R = any, C extends ClassConstructor<any> | undefined = undefined>(
+    envName: string,
+    cls?: C,
+  ): C extends ClassConstructor<infer T> ? T : R {
     const envVal = this.getRequiredEnv(envName);
 
     const baseErrorMessage = `Cannot parse object from variable '${envName}'. Error:`;
@@ -285,7 +312,7 @@ export class EnvGetterService {
       this.stopProcess(`${baseErrorMessage} ${error.message}`);
     }
 
-    if (!cls) return parsedObj as R;
+    if (!cls) return parsedObj as any;
 
     try {
       return new cls(parsedObj);
@@ -329,52 +356,52 @@ export class EnvGetterService {
    *   }
    * });
    */
-  parseArrayFromEnv<R = any>(envName: string): R extends any[] ? R : R[];
-  parseArrayFromEnv<R = any>(
-    envName: string,
-    validationOptions: { optional: true; validate?: ArrayValidatorType<R> },
-  ): (R extends any[] ? R : R[]) | undefined;
-  parseArrayFromEnv<R = any>(
-    envName: string,
-    validationOptions: { optional?: false | undefined; validate?: ArrayValidatorType<R> },
-  ): R extends any[] ? R : R[];
-  parseArrayFromEnv<R = any>(
-    envName: string,
-    validationOptions?: { optional?: boolean; validate?: ArrayValidatorType<R> },
-  ): (R extends any[] ? R : R[]) | undefined {
-    if (validationOptions?.optional && !this.isEnvSet(envName)) return;
+  // parseArrayFromEnv<R = any>(envName: string): R extends any[] ? R : R[];
+  // parseArrayFromEnv<R = any>(
+  //   envName: string,
+  //   validationOptions: { optional: true; validate?: ArrayValidatorType<R> },
+  // ): (R extends any[] ? R : R[]) | undefined;
+  // parseArrayFromEnv<R = any>(
+  //   envName: string,
+  //   validationOptions: { optional?: false | undefined; validate?: ArrayValidatorType<R> },
+  // ): R extends any[] ? R : R[];
+  // parseArrayFromEnv<R = any>(
+  //   envName: string,
+  //   validationOptions?: { optional?: boolean; validate?: ArrayValidatorType<R> },
+  // ): (R extends any[] ? R : R[]) | undefined {
+  //   if (validationOptions?.optional && !this.isEnvSet(envName)) return;
 
-    const envVal = this.getRequiredEnv(envName);
-    const baseErrorMessage = `Cannot parse object from variable '${envName}'. Error:`;
-    let parsedArray: unknown[];
+  //   const envVal = this.getRequiredEnv(envName);
+  //   const baseErrorMessage = `Cannot parse object from variable '${envName}'. Error:`;
+  //   let parsedArray: unknown[];
 
-    try {
-      parsedArray = JSON.parse(envVal);
-    } catch (error: any) {
-      this.stopProcess(`${baseErrorMessage} ${error.message}`);
-    }
+  //   try {
+  //     parsedArray = JSON.parse(envVal);
+  //   } catch (error: any) {
+  //     this.stopProcess(`${baseErrorMessage} ${error.message}`);
+  //   }
 
-    if (!Array.isArray(parsedArray)) this.stopProcess(`'${envName}' must be a stringified array`);
+  //   if (!Array.isArray(parsedArray)) this.stopProcess(`'${envName}' must be a stringified array`);
 
-    if (typeof validationOptions?.validate === "function") {
-      // validate each element of parsed array
-      parsedArray.forEach((el, i) => {
-        const result = (validationOptions.validate as ArrayValidatorType<R>)(el, i, parsedArray as any);
+  //   if (typeof validationOptions?.validate === "function") {
+  //     // validate each element of parsed array
+  //     parsedArray.forEach((el, i) => {
+  //       const result = (validationOptions.validate as ArrayValidatorType<R>)(el, i, parsedArray as any);
 
-        // check if validator works correct
-        if (!["boolean", "string"].includes(typeof result) || result === "")
-          this.stopProcess(
-            `The validation func of EnvService.parseArrayFromEnv('${envName}') must return either boolean or string\nTrace ${
-              new Error().stack
-            }`,
-          );
+  //       // check if validator works correct
+  //       if (!["boolean", "string"].includes(typeof result) || result === "")
+  //         this.stopProcess(
+  //           `The validation func of EnvService.parseArrayFromEnv('${envName}') must return either boolean or string\nTrace ${
+  //             new Error().stack
+  //           }`,
+  //         );
 
-        // validate element
-        if (result === false || (typeof result === "string" && result))
-          this.stopProcess(typeof result === "string" ? result : `'${envName}[${i}]' failed validation`);
-      });
-    }
+  //       // validate element
+  //       if (result === false || (typeof result === "string" && result))
+  //         this.stopProcess(typeof result === "string" ? result : `'${envName}[${i}]' failed validation`);
+  //     });
+  //   }
 
-    return parsedArray as R extends any[] ? R : R[];
-  }
+  //   return parsedArray as R extends any[] ? R : R[];
+  // }
 }
