@@ -2,7 +2,7 @@
     "name": "@foboss/nestjs-env-getter",
     "version": "0.0.0-b1",
     "description": "Environment variables getter for Nestjs applications",
-    "author": "Foboss",
+    "author": "Ivan Baha",
     "private": false,
     "main": "dist/index.js",
     "types": "dist/index.d.ts",
@@ -16,7 +16,7 @@
     "license": "MIT",
     "scripts": {
         "prebuild": "rm -rf dist",
-        "build": "tsc  --p tsconfig.build.json",
+        "build": "tsc --p tsconfig.build.json",
         "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
         "lint": "eslint --fix",
         "lint:report": "eslint",

@@ -7,29 +7,4 @@ on:
 
 jobs:
   qa:
-    name: QA
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-
-      - name: Install dependencies with Yarn
-        run: yarn install
-
-      - name: Run ESLint Report
-        run: yarn lint:report
-        continue-on-error: false
-
-      - name: Run Typecheck
-        run: yarn typecheck
-        continue-on-error: false
-
-      - name: Run Test Report
-        run: yarn test:report
-        continue-on-error: false
+    uses: ./.github/workflows/jobs/qa.job.yml
