@@ -7,4 +7,5 @@ on:
 
 jobs:
   qa:
+    name: QA
     uses: ./.github/workflows/qa.job.yml
