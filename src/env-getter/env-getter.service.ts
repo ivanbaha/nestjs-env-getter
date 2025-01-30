@@ -1,6 +1,6 @@
 import { Injectable } from "@nestjs/common";
 import { config } from "dotenv";
-import { isTimePeriod, parseTimePeriod, type ClassConstructor, type TimeMarker } from "../shared";
+import { ArrayValidatorType, isTimePeriod, parseTimePeriod, type ClassConstructor, type TimeMarker } from "../shared";
 
 @Injectable()
 export class EnvGetterService {
@@ -354,52 +354,52 @@ export class EnvGetterService {
    *   }
    * });
    */
-  // parseArrayFromEnv<R = any>(envName: string): R extends any[] ? R : R[];
-  // parseArrayFromEnv<R = any>(
-  //   envName: string,
-  //   validationOptions: { optional: true; validate?: ArrayValidatorType<R> },
-  // ): (R extends any[] ? R : R[]) | undefined;
-  // parseArrayFromEnv<R = any>(
-  //   envName: string,
-  //   validationOptions: { optional?: false | undefined; validate?: ArrayValidatorType<R> },
-  // ): R extends any[] ? R : R[];
-  // parseArrayFromEnv<R = any>(
-  //   envName: string,
-  //   validationOptions?: { optional?: boolean; validate?: ArrayValidatorType<R> },
-  // ): (R extends any[] ? R : R[]) | undefined {
-  //   if (validationOptions?.optional && !this.isEnvSet(envName)) return;
+  getRequiredArray<R = any>(envName: string): R extends any[] ? R : R[];
+  getRequiredArray<R = any>(
+    envName: string,
+    validationOptions: { optional: true; validate?: ArrayValidatorType<R> },
+  ): (R extends any[] ? R : R[]) | undefined;
+  getRequiredArray<R = any>(
+    envName: string,
+    validationOptions: { optional?: false | undefined; validate?: ArrayValidatorType<R> },
+  ): R extends any[] ? R : R[];
+  getRequiredArray<R = any>(
+    envName: string,
+    validationOptions?: { optional?: boolean; validate?: ArrayValidatorType<R> },
+  ): (R extends any[] ? R : R[]) | undefined {
+    if (validationOptions?.optional && !this.isEnvSet(envName)) return;
 
-  //   const envVal = this.getRequiredEnv(envName);
-  //   const baseErrorMessage = `Cannot parse object from variable '${envName}'. Error:`;
-  //   let parsedArray: unknown[];
+    const envVal = this.getRequiredEnv(envName);
+    const baseErrorMessage = `Cannot parse object from variable '${envName}'. Error:`;
+    let parsedArray: unknown[];
 
-  //   try {
-  //     parsedArray = JSON.parse(envVal);
-  //   } catch (error: any) {
-  //     this.stopProcess(`${baseErrorMessage} ${error.message}`);
-  //   }
+    try {
+      parsedArray = JSON.parse(envVal);
+    } catch (error: any) {
+      this.stopProcess(`${baseErrorMessage} ${error.message}`);
+    }
 
-  //   if (!Array.isArray(parsedArray)) this.stopProcess(`'${envName}' must be a stringified array`);
+    if (!Array.isArray(parsedArray)) this.stopProcess(`'${envName}' must be a stringified array`);
 
-  //   if (typeof validationOptions?.validate === "function") {
-  //     // validate each element of parsed array
-  //     parsedArray.forEach((el, i) => {
-  //       const result = (validationOptions.validate as ArrayValidatorType<R>)(el, i, parsedArray as any);
+    if (typeof validationOptions?.validate === "function") {
+      // validate each element of parsed array
+      parsedArray.forEach((el, i) => {
+        const result = (validationOptions.validate as ArrayValidatorType<R>)(el, i, parsedArray as any);
 
-  //       // check if validator works correct
-  //       if (!["boolean", "string"].includes(typeof result) || result === "")
-  //         this.stopProcess(
-  //           `The validation func of EnvService.parseArrayFromEnv('${envName}') must return either boolean or string\nTrace ${
-  //             new Error().stack
-  //           }`,
-  //         );
+        // check if validator works correct
+        if (!["boolean", "string"].includes(typeof result) || result === "")
+          this.stopProcess(
+            `The validation func of EnvGetterService.getRequiredArray('${envName}') must return either boolean or string\nTrace ${
+              new Error().stack
+            }`,
+          );
 
-  //       // validate element
-  //       if (result === false || (typeof result === "string" && result))
-  //         this.stopProcess(typeof result === "string" ? result : `'${envName}[${i}]' failed validation`);
-  //     });
-  //   }
+        // validate element
+        if (result === false || (typeof result === "string" && result))
+          this.stopProcess(typeof result === "string" ? result : `'${envName}[${i}]' failed validation`);
+      });
+    }
 
-  //   return parsedArray as R extends any[] ? R : R[];
-  // }
+    return parsedArray as R extends any[] ? R : R[];
+  }
 }
