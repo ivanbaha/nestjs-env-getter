@@ -29,3 +29,7 @@ jobs:
       - name: Run Typecheck
         run: yarn typecheck
         continue-on-error: false
+
+      - name: Run Test Report
+        run: yarn test:report
+        continue-on-error: false

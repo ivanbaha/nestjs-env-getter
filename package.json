@@ -21,7 +21,7 @@
         "lint": "eslint --fix",
         "lint:report": "eslint",
         "test": "jest",
-        "test:report": "jest --ci --reporters=default --reporters=jest-junit --reporters=jest-sonar --coverage --runInBand",
+        "test:report": "jest --ci --coverage --runInBand",
         "typecheck": "tsc --noEmit"
     },
     "peerDependencies": {
@@ -43,7 +43,6 @@
         "eslint-plugin-prettier": "^5.2.3",
         "globals": "^15.14.0",
         "jest": "^29.7.0",
-        "jest-junit": "^16.0.0",
         "prettier": "^3.4.2",
         "reflect-metadata": "^0.2.2",
         "rxjs": "^7.8.1",
