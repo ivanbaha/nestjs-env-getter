@@ -8,60 +8,86 @@ export class EnvGetterService {
     config();
   }
 
+  /**
+   * Logs an error message in red and terminates the process.
+   * @param message - The error message to display before exiting.
+   * @throws Never returns; always exits the process.
+   * @private
+   */
   private stopProcess(message: string): never {
     // eslint-disable-next-line no-console
     console.log("\x1b[31m%s\x1b[0m", message);
     process.exit(1);
   }
 
+  /**
+   * Checks if an environment variable exists.
+   * - If the variable is missing, the process is terminated.
+   * - If the variable exists, returns `true`.
+   * @param envName - The name of the environment variable to check.
+   * @returns `true` if the environment variable exists.
+   * @throws Terminates the process if the variable is missing.
+   * @private
+   */
   private checkEnvExisting(envName: string): boolean | never {
     if (!process.env.hasOwnProperty(envName)) this.stopProcess(`Missing '${envName}' environment variable`);
     return true;
   }
 
-  private checkIfEnvHasAllowedValue(envName: string, envVal?: string, allowedValues?: string[]): void | never {
-    if (!allowedValues?.length) this.stopProcess(`You didn't specify allowed values for variable ${envName}`);
-
+  /**
+   * Validates whether an environment variable contains an allowed value.
+   * - If the variable's value is not in the allowed list, the process is terminated.
+   * @param envName - The name of the environment variable.
+   * @param envVal - The current value of the environment variable.
+   * @param allowedValues - An array of allowed values for the variable.
+   * @throws Terminates the process if `envVal` is not in the allowed list.
+   * @private
+   */
+  private checkIfEnvHasAllowedValue(envName: string, envVal: string | null, allowedValues: string[]): void | never {
     if (!envVal || !allowedValues.includes(envVal))
       this.stopProcess(
-        `Environment variable '${envName}' can be only one of: ${JSON.stringify(
-          allowedValues,
-        )}, but received '${envVal}'`,
+        `Variable '${envName}' can be only one of: ${JSON.stringify(allowedValues)}, but received '${envVal}'`,
       );
   }
 
   /**
-   * Checks if variable is set.
+   * Checks whether an environment variable is set.
    * @param envName - The name of the environment variable.
-   * @returns True if it's set or false if it's not.
+   * @returns `true` if the environment variable exists, otherwise `false`.
    */
   isEnvSet(envName: string): boolean {
     return process.env.hasOwnProperty(envName);
   }
 
   /**
-   * Retrieves a string value of required environment variable.
-   * Stops the entire Nodejs process in case the ENV is missing.
-   * @param envName - The name of the environment variable.
-   * @param allowedValues - The list of allowed values for the environment variable.
-   * @returns The value of the ENV.
+   * Retrieves the value of a required environment variable.
+   * - Ensures that the variable exists; otherwise, the process is terminated.
+   * - If `allowedValues` is provided, checks whether the variable contains an allowed value.
+   * @param envName - The name of the required environment variable.
+   * @param allowedValues - (Optional) A list of allowed values for validation.
+   * @returns The environment variable value as a string.
+   * @throws Terminates the process if the variable is missing or contains an invalid value.
    */
   getRequiredEnv(envName: string): string;
   getRequiredEnv(envName: string, allowedValues: string[]): string;
   getRequiredEnv(envName: string, allowedValues?: string[]): string {
     this.checkEnvExisting(envName);
 
-    if (allowedValues?.length) this.checkIfEnvHasAllowedValue(envName, process.env[envName], allowedValues);
+    if (allowedValues?.length) this.checkIfEnvHasAllowedValue(envName, process.env[envName] ?? null, allowedValues);
 
     return String(process.env[envName]);
   }
 
   /**
-   * Retrieves a string value of an optional environment variable.
+   * Retrieves the value of an optional environment variable.
+   * - If the variable is set, returns its value.
+   * - If `defaultValue` is provided and the variable is not set, returns the default value.
+   * - If `allowedValues` is provided, validates that the variable (or default value) is within the allowed list.
    * @param envName - The name of the environment variable.
-   * @param defaultValue - The default value for the case when the environment variable is not set.
-   * @param allowedValues - The list of allowed values for validation environment variable by.
-   * @returns The value of the ENV, the default value, or undefined.
+   * @param defaultValue - (Optional) The default value to return if the environment variable is not set.
+   * @param allowedValues - (Optional) An array of allowed values for validation.
+   * @returns The environment variable value, the default value, or `undefined` if not set.
+   * @throws Terminates the process if the value is not in `allowedValues` (if provided).
    */
   getOptionalEnv(envName: string): string | undefined;
   getOptionalEnv(envName: string, defaultValue: string): string;
@@ -75,23 +101,26 @@ export class EnvGetterService {
     if (Array.isArray(defaultValueOrAllowedValues)) {
       const envValue = process.env[envName];
 
-      this.checkIfEnvHasAllowedValue(envName, envValue, defaultValueOrAllowedValues);
+      this.checkIfEnvHasAllowedValue(envName, envValue ?? null, defaultValueOrAllowedValues);
 
       return envValue;
     } else {
       const envValue = process.env[envName] || defaultValueOrAllowedValues;
 
-      if (allowedValues?.length) this.checkIfEnvHasAllowedValue(envName, envValue, allowedValues);
+      if (allowedValues?.length) this.checkIfEnvHasAllowedValue(envName, envValue ?? null, allowedValues);
 
       return envValue;
     }
   }
 
   /**
-   * Retrieves a decimal numeric value of the required environment variable.
-   * Stops the entire Nodejs process in case the ENV is missing.
+   * Retrieves and validates a required numeric environment variable.
+   * - Ensures the variable is set and contains only numeric characters (or underscores).
+   * - Converts the value to a number.
+   * - Terminates the process if the value is not numeric.
    * @param envName - The name of the environment variable.
-   * @returns Decimal numeric value of the required environment variable.
+   * @returns The numeric value of the environment variable.
+   * @throws Terminates the process if the variable is missing or not numeric.
    */
   getRequiredNumericEnv(envName: string): number {
     const envVal = this.getRequiredEnv(envName);
@@ -102,10 +131,12 @@ export class EnvGetterService {
   }
 
   /**
-   * Retrieves a decimal numeric value of the optional environment variable.
+   * Retrieves an optional numeric environment variable.
+   * - If the variable is set and numeric, returns its numeric value.
+   * - If `defaultValue` is provided and the variable is not set or invalid, returns the default value.
    * @param envName - The name of the environment variable.
-   * @param defaultValue - The default value for the case when the environment variable is not set.
-   * @returns The value of the ENV, the default value, or undefined.
+   * @param defaultValue - (Optional) The default numeric value to return if the variable is not set.
+   * @returns The numeric value of the environment variable or the default value.
    */
   getOptionalNumericEnv(envName: string): number | undefined;
   getOptionalNumericEnv(envName: string, defaultValue: number): number;
@@ -116,10 +147,13 @@ export class EnvGetterService {
   }
 
   /**
-   * Retrieves the value of required boolean environment variable.
-   * Stops the entire Nodejs process in case the ENV is missing.
+   * Retrieves and validates a required boolean environment variable.
+   * - Ensures the variable is set and contains either `"true"` or `"false"`.
+   * - Converts the value to a boolean.
+   * - Terminates the process if the value is not a valid boolean.
    * @param envName - The name of the environment variable.
-   * @returns True if the ENV is set and its value equals to 'true', or False otherwise.
+   * @returns The boolean value of the environment variable.
+   * @throws Terminates the process if the variable is missing or not `"true"`/`"false"`.
    */
   getRequiredBooleanEnv(envName: string): boolean {
     const envVal = this.getRequiredEnv(envName);
@@ -130,11 +164,12 @@ export class EnvGetterService {
   }
 
   /**
-   * Retrieves the value of optional boolean environment variable.
-   * If the env isn't set default value will be returned.
+   * Retrieves an optional boolean environment variable.
+   * - If the variable is set, returns `true` for `"true"` and `false` for `"false"`.
+   * - If `defaultValue` is provided and the variable is not set, returns the default value.
    * @param envName - The name of the environment variable.
-   * @param defaultValue - The default value for the case when the environment variable is not set.
-   * @returns True if the ENV is set and its value equals to 'true', or False otherwise; default value or undefined if the ENV is not set.
+   * @param defaultValue - (Optional) The default boolean value if the variable is not set.
+   * @returns The boolean value of the environment variable or the default value.
    */
   getOptionalBooleanEnv(envName: string): boolean | undefined;
   getOptionalBooleanEnv(envName: string, defaultValue: boolean): boolean;
@@ -143,10 +178,12 @@ export class EnvGetterService {
   }
 
   /**
-   * Retrieves the value of required environment variable and creates a URL.
-   * ENV value must be a valid URL string.
+   * Retrieves and validates a required environment variable as a URL.
+   * - Ensures the variable is set and contains a valid URL.
+   * - Terminates the process if the value is not a valid URL.
    * @param envName - The name of the environment variable.
-   * @returns The URL object, created from the ENV value.
+   * @returns A `URL` object representing the value of the environment variable.
+   * @throws Terminates the process if the variable is missing or not a valid URL.
    */
   getRequiredURL(envName: string): URL {
     const envVal = this.getRequiredEnv(envName);
@@ -159,10 +196,14 @@ export class EnvGetterService {
   }
 
   /**
-   * Retrieves the value of optional environment variable and creates a URL.
-   * ENV value must be a valid URL string.
+   * Retrieves an optional environment variable as a URL.
+   * - If the variable is set and a valid URL, returns a `URL` object.
+   * - If `defaultValue` is provided and the variable is not set, returns the default `URL`.
+   * - Terminates the process if the variable is set but not a valid URL.
    * @param envName - The name of the environment variable.
-   * @returns The URL object, created from the ENV value, default value, or undefined.
+   * @param defaultValue - (Optional) The default URL value to return if the variable is not set.
+   * @returns A `URL` object representing the value of the environment variable or the default value.
+   * @throws Terminates the process if the variable is set but not a valid URL.
    */
   getOptionalURL(envName: string): URL | undefined;
   getOptionalURL(envName: string, defaultValue: URL): URL;
@@ -232,8 +273,9 @@ export class EnvGetterService {
    * @param cls - The class for instantiating from the plain object parsed from the env.
    * @throws An error if variable is not set, it's impossible to parse, or the 'cls' throws validation error during instantiating.
    */
-  parseObjectFromEnv<R = any>(envName: string, cls?: ClassConstructor<R>): R {
+  getRequiredObject<R = any>(envName: string, cls?: ClassConstructor<R>): R {
     const envVal = this.getRequiredEnv(envName);
+
     const baseErrorMessage = `Cannot parse object from variable '${envName}'. Error:`;
     let parsedObj: Record<string, any>;
 
