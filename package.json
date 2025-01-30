@@ -22,7 +22,7 @@
         "lint:report": "eslint",
         "test": "jest",
         "test:report": "jest --ci --reporters=default --reporters=jest-junit --reporters=jest-sonar --coverage --runInBand",
-        "typecheck": "tsc  --noEmit"
+        "typecheck": "tsc --noEmit"
     },
     "peerDependencies": {
         "@nestjs/common": ">=9"

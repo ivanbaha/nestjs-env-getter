@@ -56,7 +56,6 @@ export class EnvGetterService {
    * @returns `true` if the environment variable exists, otherwise `false`.
    */
   isEnvSet(envName: string): boolean {
-    const a;
     return process.env.hasOwnProperty(envName);
   }
 

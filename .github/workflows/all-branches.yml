@@ -6,7 +6,8 @@ on:
       - "**"
 
 jobs:
-  lint:
+  qa:
+    name: QA
     runs-on: ubuntu-latest
 
     steps:
@@ -21,6 +22,10 @@ jobs:
       - name: Install dependencies with Yarn
         run: yarn install
 
-      - name: Run Lint Report
+      - name: Run ESLint Report
         run: yarn lint:report
+        continue-on-error: false
+
+      - name: Run Typecheck
+        run: yarn typecheck
         continue-on-error: false
