@@ -45,9 +45,7 @@ export class EnvGetterService {
    */
   private checkIfEnvHasAllowedValue(envName: string, envVal: string | null, allowedValues: string[]): void | never {
     if (!envVal || !allowedValues.includes(envVal))
-      this.stopProcess(
-        `Variable '${envName}' can be only one of: ${JSON.stringify(allowedValues)}, but received '${envVal}'`,
-      );
+      this.stopProcess(`Variable '${envName}' can be only one of: [${allowedValues}], but received '${envVal}'`);
   }
 
   /**

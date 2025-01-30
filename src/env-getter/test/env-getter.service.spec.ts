@@ -12,14 +12,112 @@ describe("Env Getter Service", () => {
     service = app.get<EnvGetterService>(EnvGetterService);
 
     jest.spyOn(service as any, "stopProcess").mockImplementation();
-    // jest.spyOn(service as any, "stopProcess").mockImplementation((message) => {
-    //   throw new Error(typeof message === "string" ? message : "unsupported message");
-    // });
   });
 
   describe("isEnvSet", () => {
     it("should check env", () => {
       expect(service.isEnvSet("TEST_STRING_ENV")).toBe(true);
+    });
+  });
+
+  describe("getRequiredEnv", () => {
+    afterEach(() => {
+      delete process.env.TEST_ENV_getRequiredEnv;
+    });
+
+    it("should return the value of the environment variable if it exists", () => {
+      process.env.TEST_ENV_getRequiredEnv = "testValue";
+
+      const result = service.getRequiredEnv("TEST_ENV_getRequiredEnv");
+
+      expect(result).toBe("testValue");
+    });
+
+    it("should stop process with an error if the environment variable is missing", () => {
+      service.getRequiredEnv("MISSING_ENV");
+
+      expect(service["stopProcess"]).toHaveBeenCalledWith("Missing 'MISSING_ENV' environment variable");
+    });
+
+    it("should stop process with an error if the environment variable does not match the allowed values", () => {
+      process.env.TEST_ENV_getRequiredEnv = "invalidValue";
+      const allowedValues = ["one", "two"];
+
+      service.getRequiredEnv("TEST_ENV_getRequiredEnv", allowedValues);
+
+      expect(service["stopProcess"]).toHaveBeenCalledWith(
+        "Variable 'TEST_ENV_getRequiredEnv' can be only one of: [one,two], but received 'invalidValue'",
+      );
+    });
+
+    it("should return the value of the environment variable if it matches the allowed values", () => {
+      process.env.TEST_ENV_getRequiredEnv = "one";
+      const allowedValues = ["one", "two"];
+
+      const result = service.getRequiredEnv("TEST_ENV_getRequiredEnv", allowedValues);
+
+      expect(result).toBe("one");
+    });
+  });
+
+  describe("getOptionalEnv", () => {
+    afterEach(() => {
+      delete process.env.TEST_ENV_getOptionalEnv;
+    });
+
+    it("should return the value of the environment variable if it exists and no default value is provided", () => {
+      process.env.TEST_ENV_getOptionalEnv = "testValue";
+
+      const result = service.getOptionalEnv("TEST_ENV_getOptionalEnv");
+
+      expect(result).toBe("testValue");
+    });
+
+    it("should return the default value if the environment variable is missing", () => {
+      delete process.env.TEST_ENV_getOptionalEnv;
+
+      const result = service.getOptionalEnv("TEST_ENV_getOptionalEnv", "defaultValue");
+
+      expect(result).toBe("defaultValue");
+    });
+
+    it("should return the value of the environment variable if it exists and it matches one of the allowed values", () => {
+      process.env.TEST_ENV_getOptionalEnv = "validValue";
+      const allowedValues = ["validValue", "anotherValue"];
+
+      const result = service.getOptionalEnv("TEST_ENV_getOptionalEnv", allowedValues);
+
+      expect(result).toBe("validValue");
+    });
+
+    it("should return undefined if the environment variable is missing and no default value is provided", () => {
+      delete process.env.TEST_ENV_getOptionalEnv;
+
+      const result = service.getOptionalEnv("TEST_ENV_getOptionalEnv");
+
+      expect(result).toBeUndefined();
+    });
+
+    it("should stop process with an error if the environment variable does not match the allowed values", () => {
+      process.env.TEST_ENV_getOptionalEnv = "invalidValue";
+      const allowedValues = ["one", "two"];
+
+      service.getOptionalEnv("TEST_ENV_getOptionalEnv", allowedValues);
+
+      expect(service["stopProcess"]).toHaveBeenCalledWith(
+        "Variable 'TEST_ENV_getOptionalEnv' can be only one of: [one,two], but received 'invalidValue'",
+      );
+    });
+
+    it("should stop process with an error if the environment variable is missing and the default value is not one of allowed values", () => {
+      delete process.env.TEST_ENV_getOptionalEnv;
+      const allowedValues = ["one", "two"];
+
+      service.getOptionalEnv("TEST_ENV_getOptionalEnv", "defaultValue", allowedValues);
+
+      expect(service["stopProcess"]).toHaveBeenCalledWith(
+        "Variable 'TEST_ENV_getOptionalEnv' can be only one of: [one,two], but received 'defaultValue'",
+      );
     });
   });
 
