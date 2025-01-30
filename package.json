@@ -19,7 +19,7 @@
         "build": "tsc  --p tsconfig.build.json",
         "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
         "lint": "eslint --fix",
-        "lint:report": "eslint ",
+        "lint:report": "eslint",
         "test": "jest",
         "test:report": "jest --ci --reporters=default --reporters=jest-junit --reporters=jest-sonar --coverage --runInBand",
         "typecheck": "tsc  --noEmit"

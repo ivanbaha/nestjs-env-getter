@@ -1,0 +1,26 @@
+name: Basic checkings (all branches)
+
+on:
+  push:
+    branches:
+      - "**"
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install dependencies with Yarn
+        run: yarn install
+
+      - name: Run Lint Report
+        run: yarn lint:report
+        continue-on-error: false
