@@ -3,7 +3,7 @@ name: QA
 on: workflow_call
 
 jobs:
-  qa:
+  QA:
     runs-on: ubuntu-latest
 
     steps:
