@@ -182,172 +182,85 @@ describe("Env Getter Service", () => {
       process.env.USER_ENV_getRequiredObject = JSON.stringify({ name: "Alice" }); // Missing age field
 
       service.getRequiredObject("USER_ENV_getRequiredObject", User);
+
       expect(service["stopProcess"]).toHaveBeenCalledWith(
         "Cannot parse object from variable 'USER_ENV_getRequiredObject'. Error: Invalid age",
       );
     });
   });
 
-  // it("should get required string env", () => {
-  //   expect(envService.getRequiredEnv("TEST_STRING_ENV")).toBe("test-string");
-  //   expect(envService.getRequiredEnv("TEST_STRING_ENV", ["test-string", "test"])).toBe("test-string");
-  // });
+  describe("getRequiredArray", () => {
+    afterEach(() => {
+      delete process.env.TEST_ARRAY;
+    });
 
-  // it("should get optional string env", () => {
-  //   expect(envService.getOptionalEnv("TEST_STRING_ENV", "default-value")).toBe("test-string");
-  //   expect(envService.getOptionalEnv("TEST_STRING_ENV_UNSET", "default-value")).toBe("default-value");
-  //   expect(envService.getOptionalEnv("TEST_STRING_ENV", ["test-string", "test"])).toBe("test-string");
-  //   expect(envService.getOptionalEnv("TEST_STRING_ENV_UNSET", "default-value", ["test", "default-value"])).toBe(
-  //     "default-value",
-  //   );
-  // });
+    it("should return a parsed array from a valid JSON string", () => {
+      process.env.TEST_ARRAY = '["apple", "banana", "cherry"]';
 
-  // it("should get numeric env", () => {
-  //   expect(envService.getRequiredNumericEnv("TEST_NUMBER_ENV")).toBe(1555);
-  //   expect(envService.getNumericEnv("TEST_NUMBER_ENV", 333)).toBe(1555);
-  // });
+      const result = service.getRequiredArray<string>("TEST_ARRAY");
 
-  // it("should return a default value because of wrong numeric env format", () => {
-  //   expect(envService.getNumericEnv("TEST_NUMBER_ENV_UNSET")).toBeUndefined();
-  //   expect(envService.getNumericEnv("TEST_NUMBER_ENV_UNSET", 333)).toBe(333);
-  //   expect(envService.getNumericEnv("TEST_STRING_ENV", 333)).toBe(333);
-  // });
+      expect(result).toEqual(["apple", "banana", "cherry"]);
+    });
 
-  // it("should return boolean env", () => {
-  //   expect(envService.getBooleanEnv("TEST_BOOLEAN_ENV")).toBe(true);
-  // });
+    it("should return undefined if optional is true and the environment variable is missing", () => {
+      delete process.env.TEST_ARRAY;
 
-  // it("should return optional boolean env", () => {
-  //   expect(envService.getOptionalBooleanEnv("TEST_BOOLEAN_ENV")).toBe(true);
-  //   expect(envService.getOptionalBooleanEnv("TEST_BOOLEAN_ENV_UNSET", true)).toBe(true);
-  //   expect(envService.getOptionalBooleanEnv("TEST_BOOLEAN_ENV_UNSET")).toBeUndefined();
-  // });
+      const result = service.getRequiredArray<string>("TEST_ARRAY", { optional: true });
 
-  // it("should return required boolean env", () => {
-  //   expect(envService.getRequiredBooleanEnv("TEST_BOOLEAN_ENV")).toBe(true);
-  // });
+      expect(result).toBeUndefined();
+    });
 
-  // it("should skip checking of required envs.", () => {
-  //   process.env.SKIP_REQUIRED_ENVS = "true";
+    it("should throw an error if the environment variable is not set and optional is false", () => {
+      delete process.env.TEST_ARRAY;
 
-  //   expect(envService.getRequiredEnv("TEST_STRING_ENV")).toBe("skip_variable");
-  //   expect(envService.getRequiredNumericEnv("TEST_NUMBER_ENV")).toBe(1);
-  //   expect(envService.getRequiredBooleanEnv("TEST_BOOLEAN_ENV")).toBe(false);
+      service.getRequiredArray<string>("TEST_ARRAY");
 
-  //   process.env.SKIP_REQUIRED_ENVS = undefined;
-  // });
+      expect(service["stopProcess"]).toHaveBeenCalledWith(
+        "Cannot parse object from variable 'TEST_ARRAY'. Error: \"undefined\" is not valid JSON",
+      );
+    });
 
-  // it("should get time period env", () => {
-  //   expect(envService.getTimePeriod("TEST_TIME_PERIOD_ENV_UNSET", "1000")).toBe(1000);
-  //   expect(envService.getTimePeriod("TEST_TIME_PERIOD_ENV_UNSET", "10s")).toBe(10_000);
-  //   expect(envService.getTimePeriod("TEST_TIME_PERIOD_ENV_UNSET", "10m")).toBe(600_000);
-  //   expect(envService.getTimePeriod("TEST_TIME_PERIOD_ENV_UNSET", "10h")).toBe(36_000_000);
-  //   expect(envService.getTimePeriod("TEST_TIME_PERIOD_ENV_UNSET", "10d")).toBe(864_000_000);
-  //   // 5
-  //   expect(envService.getTimePeriod("TEST_TIME_PERIOD_ENV", "1000")).toBe(5);
-  //   // 5s
-  //   expect(envService.getTimePeriod("TEST_TIME_PERIOD_SEC_ENV", "1000")).toBe(5_000);
-  //   expect(envService.getTimePeriod("TEST_TIME_PERIOD_SEC_ENV", "1000", "s")).toBe(5);
-  //   // 5m
-  //   expect(envService.getTimePeriod("TEST_TIME_PERIOD_MIN_ENV", "1000")).toBe(300_000);
-  //   expect(envService.getTimePeriod("TEST_TIME_PERIOD_MIN_ENV", "1000", "s")).toBe(300);
-  //   // 5h
-  //   expect(envService.getTimePeriod("TEST_TIME_PERIOD_HOUR_ENV", "1000")).toBe(18_000_000);
-  //   expect(envService.getTimePeriod("TEST_TIME_PERIOD_HOUR_ENV", "1000", "s")).toBe(18_000);
-  //   expect(envService.getTimePeriod("TEST_TIME_PERIOD_HOUR_ENV", "1000", "m")).toBe(300);
-  //   // 5d
-  //   expect(envService.getTimePeriod("TEST_TIME_PERIOD_DAY_ENV", "1000", "ms")).toBe(432_000_000);
-  //   expect(envService.getTimePeriod("TEST_TIME_PERIOD_DAY_ENV", "1000", "s")).toBe(432_000);
-  //   expect(envService.getTimePeriod("TEST_TIME_PERIOD_DAY_ENV", "1000", "m")).toBe(7_200);
-  //   expect(envService.getTimePeriod("TEST_TIME_PERIOD_DAY_ENV", "1000", "h")).toBe(120);
-  // });
+    it("should throw an error if the environment variable is not a valid JSON array", () => {
+      process.env.TEST_ARRAY = '"not an array"';
 
-  // it("should get required URL env", () => {
-  //   expect(envService.getRequiredURL("TEST_VALID_URL_ENV")).toBe("http://booboo.com/");
+      service.getRequiredArray<string>("TEST_ARRAY");
 
-  //   // skip envs flow
-  //   process.env[SKIP_REQUIRED_ENVS_VAR] = "true";
-  //   const res = envService.getRequiredURL("UNSET_ENV");
-  //   expect(res).toBe(`http://${SKIP_ENV}.com`);
-  //   process.env[SKIP_REQUIRED_ENVS_VAR] = undefined;
-  // });
+      expect(service["stopProcess"]).toHaveBeenCalledWith("'TEST_ARRAY' must be a stringified array");
+    });
 
-  // it("should exit with error message during getting required URL env", () => {
-  //   const exit = jest.spyOn(process, "exit").mockImplementation(() => {
-  //     throw new Error();
-  //   });
+    it("should apply validation function to each element", () => {
+      process.env.TEST_ARRAY = "[10, 20, 30]";
 
-  //   // unset Env
-  //   try {
-  //     envService.getRequiredURL("UNSET_ENV");
-  //   } catch (_) {}
-  //   // invalid value
-  //   try {
-  //     envService.getRequiredURL("TEST_INVALID_URL_ENV");
-  //   } catch (_) {}
+      const result = service.getRequiredArray<number>("TEST_ARRAY", {
+        validate: (value) => (typeof value === "number" && value > 5) || "Each element must be greater than 5",
+      });
 
-  //   expect(exit).toHaveBeenCalledTimes(2);
-  // });
+      expect(result).toEqual([10, 20, 30]);
+    });
 
-  // it("should get optional URL env", () => {
-  //   expect(envService.getOptionalURL("UNSET_ENV")).toBe(undefined);
-  //   expect(envService.getOptionalURL("TEST_VALID_URL_ENV")).toBe("http://booboo.com/");
-  //   expect(envService.getOptionalURL("UNSET_ENV", "http://default.url")).toBe("http://default.url/");
-  // });
+    it("should throw an error if validation function fails for an element", () => {
+      process.env.TEST_ARRAY = "[10, 20, 3]";
 
-  // it("should exit with error message during getting optional URL env", () => {
-  //   const exit = jest.spyOn(process, "exit").mockImplementation(() => {
-  //     throw new Error();
-  //   });
+      service.getRequiredArray<number>("TEST_ARRAY", {
+        validate: (value) => (typeof value === "number" && value > 5) || "Each element must be greater than 5",
+      });
 
-  //   try {
-  //     envService.getOptionalURL("TEST_INVALID_URL_ENV");
-  //   } catch (_) {}
-  //   try {
-  //     envService.getOptionalURL("UNSET_URL", "invalid def url");
-  //   } catch (_) {}
+      expect(service["stopProcess"]).toHaveBeenCalledWith("Each element must be greater than 5");
+    });
 
-  //   expect(exit).toHaveBeenCalledTimes(2);
-  // });
+    it("should throw an error if the validation function returns an invalid type", () => {
+      process.env.TEST_ARRAY = "[1, 2, 3]";
+      jest.spyOn(global, "Error").mockImplementationOnce((message) => {
+        return { message, stack: "mocked stack trace" } as any;
+      });
 
-  // it("should exit with error message during getting required env", () => {
-  //   const exit = jest.spyOn(process, "exit").mockImplementation(() => {
-  //     throw new Error();
-  //   });
+      service.getRequiredArray<number>("TEST_ARRAY", {
+        validate: () => ({}) as any,
+      });
 
-  //   // not allowed value
-  //   try {
-  //     envService.getRequiredEnv("TEST_STRING_ENV", ["test"]);
-  //   } catch (_) {}
-  //   // allowed values can't be an empty array
-  //   try {
-  //     envService.getOptionalEnv("TEST_STRING_ENV", []);
-  //   } catch (_) {}
-
-  //   expect(exit).toHaveBeenCalledTimes(2);
-  // });
-
-  // it("should exit with error message during getting optional env", () => {
-  //   const exit = jest.spyOn(process, "exit").mockImplementation(() => {
-  //     throw new Error();
-  //   });
-
-  //   // not allowed value
-  //   try {
-  //     envService.getOptionalEnv("TEST_STRING_ENV", ["test"]);
-  //   } catch (_) {}
-  //   // allowed values can't be an empty array
-  //   try {
-  //     envService.getOptionalEnv("TEST_STRING_ENV", []);
-  //   } catch (_) {}
-  //   // default value is not from allowed values list
-  //   try {
-  //     envService.getOptionalEnv("TEST_STRING_ENV_UNSET", "test_string", ["test"]);
-  //   } catch (_) {}
-
-  //   expect(exit).toHaveBeenCalledTimes(3);
-  // });
-
-  // TODO: write test cases for parseObjectFromEnv
-  // TODO: write test cases for parseArrayFromEnv 😆
+      expect(service["stopProcess"]).toHaveBeenCalledWith(
+        `The validation func of EnvGetterService.getRequiredArray('TEST_ARRAY') must return either boolean or string\nTrace mocked stack trace`,
+      );
+    });
+  });
 });

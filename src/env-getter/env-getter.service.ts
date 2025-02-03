@@ -1,6 +1,7 @@
 import { Injectable } from "@nestjs/common";
 import { config } from "dotenv";
-import { ArrayValidatorType, isTimePeriod, parseTimePeriod, type ClassConstructor, type TimeMarker } from "../shared";
+import { isTimePeriod, parseTimePeriod, type ClassConstructor, type TimeMarker } from "../shared";
+import { type ArrayValidatorType } from "./types";
 
 @Injectable()
 export class EnvGetterService {
@@ -320,13 +321,14 @@ export class EnvGetterService {
   }
 
   /**
-   * Gets the value of the variable and parse it to an array.
-   * @param envName - The name of the environment variable.
-   * @param cls - The class for instantiating from the plain object parsed from the env.
-   * @param validationOptions - Validation options.
-   * @param validationOptions.optional - Shows if the ENV is optional. By default it's required.
-   * @param validationOptions.validate - A callback for validation each element of an array.
-   * @throws An error if variable is not set, it's impossible to parse, or the 'cls' throws validation error during instantiating.
+   * Retrieves and parses an environment variable as an array.
+   * @template R - The expected type of array elements.
+   * @param envName - The name of the environment variable to retrieve.
+   * @param validationOptions - Optional validation settings.
+   * @param validationOptions.optional - If `true`, allows the environment variable to be absent.
+   * @param validationOptions.validate - A function to validate each array element.
+   * @returns The parsed array or `undefined` if optional.
+   * @throws If the environment variable is missing, cannot be parsed, is not an array, or fails validation.
    * @example
    * this.forwardHeaders = this.envService.parseArrayFromEnv<string>('FORWARD_HEADERS');
    * @example

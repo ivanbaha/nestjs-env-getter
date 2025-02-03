@@ -6,7 +6,8 @@ module.exports = {
     ".+\\.ts$": "ts-jest",
   },
   collectCoverageFrom: ["**/*.ts"],
-  coverageDirectory: "../coverage",
   testEnvironment: "node",
   setupFiles: ["<rootDir>/test-utils/envs.mock.ts"],
+  coverageDirectory: "../coverage",
+  coveragePathIgnorePatterns: [".module.ts", ".mock.ts", "<rootDir>/index.ts", "configuration.ts", "typings.ts"],
 };

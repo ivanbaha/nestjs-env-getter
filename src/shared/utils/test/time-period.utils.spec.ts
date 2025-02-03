@@ -23,6 +23,12 @@ describe("isTimePeriod", () => {
     expect(isTimePeriod("10x")).toBe(false);
     expect(isTimePeriod(" ")).toBe(false);
   });
+
+  test("returns false for invalid data types", () => {
+    expect(isTimePeriod(true as any)).toBe(false);
+    expect(isTimePeriod(null as any)).toBe(false);
+    expect(isTimePeriod({} as any)).toBe(false);
+  });
 });
 
 describe("parseTimePeriod", () => {
@@ -45,5 +51,6 @@ describe("parseTimePeriod", () => {
   test("returns NaN for invalid inputs", () => {
     expect(parseTimePeriod("abc")).toBeNaN();
     expect(parseTimePeriod(" ")).toBeNaN();
+    expect(parseTimePeriod(true as any)).toBeNaN();
   });
 });
