@@ -1,0 +1,17 @@
+name: Release and Publish
+permissions:
+  contents: write
+
+on:
+  workflow_dispatch:
+  release:
+    types: [created]
+
+jobs:
+  qa:
+    name: 1
+    uses: ./.github/workflows/qa.job.yml
+
+  publish:
+    name: 2
+    uses: ./.github/workflows/publish.job.yml

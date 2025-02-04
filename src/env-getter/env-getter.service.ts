@@ -189,8 +189,10 @@ export class EnvGetterService {
 
     try {
       return new URL(envVal);
-    } catch (_) {
-      this.stopProcess(`Variable '${envName}' must be a valid URL`);
+    } catch (err) {
+      this.stopProcess(
+        `Variable '${envName}' must be a valid URL. Error: ${err instanceof Error ? err.message : JSON.stringify(err)}`,
+      );
     }
   }
 
@@ -211,8 +213,10 @@ export class EnvGetterService {
 
     try {
       return envVal ? new URL(envVal) : defaultValue;
-    } catch (_) {
-      this.stopProcess(`Variable '${envName}' must be a valid URL`);
+    } catch (err) {
+      this.stopProcess(
+        `Variable '${envName}' must be a valid URL. Error: ${err instanceof Error ? err.message : JSON.stringify(err)}`,
+      );
     }
   }
 
