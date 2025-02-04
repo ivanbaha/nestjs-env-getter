@@ -13,7 +13,7 @@ jobs:
   install:
     uses: ./.github/workflows/install.job.yml
 
-  qa:
+  lint:
     needs: install
     uses: ./.github/workflows/lint.job.yml
 
