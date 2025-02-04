@@ -25,8 +25,7 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-dist-
 
-      - name: Authenticate with npm
-        run: echo "//registry.npmjs.org/:_authToken=${{ secrets.NPM_REGISTRY_PAT }}" > ~/.npmrc
-
       - name: Publish package to npm
-        run: yarn publish --non-interactive
+        run: npm publish
+        env:
+          NODE_AUTH_TOKEN: ${{secrets.NPM_REGISTRY_PAT}}
