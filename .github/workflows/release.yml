@@ -29,7 +29,7 @@ jobs:
       - lint
       - typecheck
       - tests
-    uses: ./.github/workflows/publish.job.yml
+    uses: ./.github/workflows/build.job.yml
 
   publish:
     needs:
