@@ -1,6 +1,6 @@
-# The QA job for Lint and Type checkings, and Unit testing
-
 on: workflow_call
+permissions:
+  contents: read
 
 jobs:
   install:
