@@ -1,8 +1,10 @@
 {
     "extends": "./tsconfig.json",
     "compilerOptions": {
-        "declarationDir": "types"
+        "declaration": true,
+        "removeComments": false,
+        "outDir": "./dist"
     },
     "include": ["src"],
-    "exclude": ["test", "**/*spec.ts"]
+    "exclude": ["test", "**/*spec.ts", "**/*mock.ts"]
 }

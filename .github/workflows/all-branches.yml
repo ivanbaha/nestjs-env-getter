@@ -1,0 +1,27 @@
+name: Basic checkings (all branches)
+permissions:
+  contents: read
+  pull-requests: write
+
+on:
+  push:
+    branches:
+      - "**"
+  pull_request:
+    types: [opened]
+
+jobs:
+  install:
+    uses: ./.github/workflows/install.job.yml
+
+  lint:
+    needs: install
+    uses: ./.github/workflows/lint.job.yml
+
+  typecheck:
+    needs: install
+    uses: ./.github/workflows/typecheck.job.yml
+
+  tests:
+    needs: install
+    uses: ./.github/workflows/unit-tests.job.yml

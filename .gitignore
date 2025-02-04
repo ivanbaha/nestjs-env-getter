@@ -39,12 +39,3 @@ test/tmp
 
 # Project
 .env
-
-# gitlab junit reporter
-junit.xml
-
-.current-version
-
-
-# Git hooks
-.githooks
