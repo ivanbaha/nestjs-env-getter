@@ -2,7 +2,7 @@ on: workflow_call
 
 jobs:
   publish:
-    name: Publish to NPM
+    name: Build
     runs-on: ubuntu-latest
 
     steps:
@@ -15,16 +15,22 @@ jobs:
           node-version: "20"
           registry-url: "https://registry.npmjs.org/"
 
-      - name: Restore dist from cache
+      - name: Restore node_modules from cache
+        uses: actions/cache@v4
+        with:
+          path: node_modules
+          key: ${{ runner.os }}-node_modules-${{ hashFiles('yarn.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-node_modules-
+
+      - name: Build Project
+        run: yarn build
+        continue-on-error: false
+
+      - name: Cache dist
         uses: actions/cache@v4
         with:
           path: dist
           key: ${{ runner.os }}-dist-${{ github.sha }}
           restore-keys: |
             ${{ runner.os }}-dist-
-
-      - name: Authenticate with npm
-        run: echo "//registry.npmjs.org/:_authToken=${{ secrets.NPM_REGISTRY_PAT }}" > ~/.npmrc
-
-      - name: Publish package to npm
-        run: yarn publish --non-interactive

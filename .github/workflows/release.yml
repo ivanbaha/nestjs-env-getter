@@ -8,10 +8,31 @@ on:
     types: [created]
 
 jobs:
-  qa:
-    name: 1
-    uses: ./.github/workflows/qa.job.yml
+  install:
+    uses: ./.github/workflows/install.job.yml
+
+  lint:
+    needs: install
+    uses: ./.github/workflows/lint.job.yml
+
+  typecheck:
+    needs: install
+    uses: ./.github/workflows/typecheck.job.yml
+
+  tests:
+    needs: install
+    uses: ./.github/workflows/unit-tests.job.yml
+
+  build:
+    needs:
+      - install
+      - lint
+      - typecheck
+      - tests
+    uses: ./.github/workflows/publish.job.yml
 
   publish:
-    name: 2
+    needs:
+      - install
+      - build
     uses: ./.github/workflows/publish.job.yml

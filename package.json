@@ -1,6 +1,6 @@
 {
     "name": "@foboss/nestjs-env-getter",
-    "version": "0.0.0-b1",
+    "version": "0.0.0-beta1",
     "description": "Environment variables getter for Nestjs applications",
     "author": "Ivan Baha",
     "private": false,
