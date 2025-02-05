@@ -1,7 +1,6 @@
 on: workflow_call
 permissions:
-  contents: read
-  id-token: write
+  contents: write
 
 jobs:
   publish:
