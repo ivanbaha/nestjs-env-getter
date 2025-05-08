@@ -15,7 +15,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "20"
-          registry-url: "https://registry.npmjs.org"
 
       - name: Restore dist from cache
         uses: actions/cache@v4
@@ -25,7 +24,8 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-dist-
 
+      - name: Configure npm auth
+        run: echo "//registry.npmjs.org/:_authToken=${{ secrets.NPM_REGISTRY_PAT }}" > ~/.npmrc
+
       - name: Publish package to npm
         run: npm publish --provenance --access public
-        env:
-          NODE_AUTH_TOKEN: ${{secrets.NPM_REGISTRY_PAT}}
