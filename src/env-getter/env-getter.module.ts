@@ -1,8 +1,6 @@
-import { Module } from "@nestjs/common";
+import { Global, Module } from "@nestjs/common";
 import { EnvGetterService } from "./env-getter.service";
 
-@Module({
-  providers: [EnvGetterService],
-  exports: [EnvGetterService],
-})
+@Global()
+@Module({ providers: [EnvGetterService], exports: [EnvGetterService] })
 export class EnvGetterModule {}

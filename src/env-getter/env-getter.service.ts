@@ -1,6 +1,8 @@
-import { Injectable } from "@nestjs/common";
 import { config } from "dotenv";
-import { isTimePeriod, parseTimePeriod, type ClassConstructor, type TimeMarker } from "../shared";
+
+import { Injectable } from "@nestjs/common";
+
+import { type ClassConstructor, isTimePeriod, parseTimePeriod, TimeMarker } from "../shared";
 import { type ArrayValidatorType } from "./types";
 
 @Injectable()
@@ -328,55 +330,30 @@ export class EnvGetterService {
    * Retrieves and parses an environment variable as an array.
    * @template R - The expected type of array elements.
    * @param envName - The name of the environment variable to retrieve.
-   * @param validationOptions - Optional validation settings.
-   * @param validationOptions.optional - If `true`, allows the environment variable to be absent.
-   * @param validationOptions.validate - A function to validate each array element.
+   * @param validate - A function to validate each array element.
    * @returns The parsed array or `undefined` if optional.
    * @throws If the environment variable is missing, cannot be parsed, is not an array, or fails validation.
    * @example
    * this.forwardHeaders = this.envService.parseArrayFromEnv<string>('FORWARD_HEADERS');
    * @example
-   * this.forwardHeaders = this.envService.parseArrayFromEnv<string>('FORWARD_HEADERS', {
-   *   optional: true,
-   *   validate: (el) => typeof el === 'string'
-   * });
+   * this.forwardHeaders = this.envService.parseArrayFromEnv<string>(
+   *    'FORWARD_HEADERS',
+   *    (el) => typeof el === 'string'
+   * );
    * @example
-   * this.forwardHeaders = this.envService.parseArrayFromEnv<[string, number]>('FORWARD_HEADERS', {
-   *   optional: true,
-   *   validate: (el, i, arr) => {
-   *     if (arr?.length !== 2) return 'FORWARD_HEADERS must be an array of 2 valid items';
-   *     if (i === 0 && typeof el === 'string') return true;
-   *     if (i === 1 && typeof el === 'number') return true;
-   *     return false;
-   *   }
-   * });
-   * @example
-   * this.forwardHeaders = this.envService.parseArrayFromEnv<[string, number]>('FORWARD_HEADERS', {
-   *   optional: true,
-   *   validate: (el, i) => {
-   *     if (i === 0 && typeof el !== 'string') return 'FORWARD_HEADERS[0] must be a string';
-   *     if (i === 1 && typeof el !== 'number') return 'FORWARD_HEADERS[1] must be a number';
-   *     return true;
-   *   }
-   * });
+   * this.forwardHeaders = this.envService.parseArrayFromEnv<[string, number]>(
+   *    'FORWARD_HEADERS',
+   *    (el, i, arr) => {
+   *      if (arr?.length !== 2) return 'FORWARD_HEADERS must be an array of 2 valid items';
+   *      if (i === 0 && typeof el === 'string') return true;
+   *      if (i === 1 && typeof el === 'number') return true;
+   *      return false;
+   *    }
+   * );
    */
-  getRequiredArray<R = any>(envName: string): R extends any[] ? R : R[];
-  getRequiredArray<R = any>(
-    envName: string,
-    validationOptions: { optional: true; validate?: ArrayValidatorType<R> },
-  ): (R extends any[] ? R : R[]) | undefined;
-  getRequiredArray<R = any>(
-    envName: string,
-    validationOptions: { optional?: false | undefined; validate?: ArrayValidatorType<R> },
-  ): R extends any[] ? R : R[];
-  getRequiredArray<R = any>(
-    envName: string,
-    validationOptions?: { optional?: boolean; validate?: ArrayValidatorType<R> },
-  ): (R extends any[] ? R : R[]) | undefined {
-    if (validationOptions?.optional && !this.isEnvSet(envName)) return;
-
+  getRequiredArray<R = any>(envName: string, validate?: ArrayValidatorType<R>): R extends any[] ? R : R[] {
     const envVal = this.getRequiredEnv(envName);
-    const baseErrorMessage = `Cannot parse object from variable '${envName}'. Error:`;
+    const baseErrorMessage = `Cannot parse an array from variable '${envName}'. Error:`;
     let parsedArray: unknown[];
 
     try {
@@ -387,10 +364,10 @@ export class EnvGetterService {
 
     if (!Array.isArray(parsedArray)) this.stopProcess(`'${envName}' must be a stringified array`);
 
-    if (typeof validationOptions?.validate === "function") {
+    if (typeof validate === "function") {
       // validate each element of parsed array
       parsedArray.forEach((el, i) => {
-        const result = (validationOptions.validate as ArrayValidatorType<R>)(el, i, parsedArray as any);
+        const result = (validate as ArrayValidatorType<R>)(el, i, parsedArray as any);
 
         // check if validator works correct
         if (!["boolean", "string"].includes(typeof result) || result === "")
