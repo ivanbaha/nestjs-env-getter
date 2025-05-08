@@ -36,3 +36,5 @@ jobs:
       - install
       - build
     uses: ./.github/workflows/publish.job.yml
+    secrets:
+      NPM_REGISTRY_PAT: ${{ secrets.NPM_REGISTRY_PAT }}
