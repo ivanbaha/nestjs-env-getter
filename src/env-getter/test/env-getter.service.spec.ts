@@ -5,9 +5,7 @@ describe("Env Getter Service", () => {
   let service: EnvGetterService;
 
   beforeEach(async () => {
-    const app: TestingModule = await Test.createTestingModule({
-      providers: [EnvGetterService],
-    }).compile();
+    const app: TestingModule = await Test.createTestingModule({ providers: [EnvGetterService] }).compile();
 
     service = app.get<EnvGetterService>(EnvGetterService);
 
@@ -202,21 +200,13 @@ describe("Env Getter Service", () => {
       expect(result).toEqual(["apple", "banana", "cherry"]);
     });
 
-    it("should return undefined if optional is true and the environment variable is missing", () => {
-      delete process.env.TEST_ARRAY;
-
-      const result = service.getRequiredArray<string>("TEST_ARRAY", { optional: true });
-
-      expect(result).toBeUndefined();
-    });
-
-    it("should throw an error if the environment variable is not set and optional is false", () => {
+    it("should throw an error if the environment variable is not set", () => {
       delete process.env.TEST_ARRAY;
 
       service.getRequiredArray<string>("TEST_ARRAY");
 
       expect(service["stopProcess"]).toHaveBeenCalledWith(
-        "Cannot parse object from variable 'TEST_ARRAY'. Error: \"undefined\" is not valid JSON",
+        "Cannot parse an array from variable 'TEST_ARRAY'. Error: \"undefined\" is not valid JSON",
       );
     });
 
@@ -231,9 +221,10 @@ describe("Env Getter Service", () => {
     it("should apply validation function to each element", () => {
       process.env.TEST_ARRAY = "[10, 20, 30]";
 
-      const result = service.getRequiredArray<number>("TEST_ARRAY", {
-        validate: (value) => (typeof value === "number" && value > 5) || "Each element must be greater than 5",
-      });
+      const result = service.getRequiredArray<number>(
+        "TEST_ARRAY",
+        (value) => (typeof value === "number" && value > 5) || "Each element must be greater than 5",
+      );
 
       expect(result).toEqual([10, 20, 30]);
     });
@@ -241,9 +232,10 @@ describe("Env Getter Service", () => {
     it("should throw an error if validation function fails for an element", () => {
       process.env.TEST_ARRAY = "[10, 20, 3]";
 
-      service.getRequiredArray<number>("TEST_ARRAY", {
-        validate: (value) => (typeof value === "number" && value > 5) || "Each element must be greater than 5",
-      });
+      service.getRequiredArray<number>(
+        "TEST_ARRAY",
+        (value) => (typeof value === "number" && value > 5) || "Each element must be greater than 5",
+      );
 
       expect(service["stopProcess"]).toHaveBeenCalledWith("Each element must be greater than 5");
     });
@@ -254,9 +246,7 @@ describe("Env Getter Service", () => {
         return { message, stack: "mocked stack trace" } as any;
       });
 
-      service.getRequiredArray<number>("TEST_ARRAY", {
-        validate: () => ({}) as any,
-      });
+      service.getRequiredArray<number>("TEST_ARRAY", () => ({}) as any);
 
       expect(service["stopProcess"]).toHaveBeenCalledWith(
         `The validation func of EnvGetterService.getRequiredArray('TEST_ARRAY') must return either boolean or string\nTrace mocked stack trace`,
