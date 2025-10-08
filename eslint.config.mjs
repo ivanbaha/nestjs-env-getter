@@ -53,10 +53,25 @@ export default [
       "jsdoc/check-tag-names": "warn",
       "jsdoc/no-bad-blocks": "warn",
       "jsdoc/sort-tags": "warn",
+      "jsdoc/require-throws-type": "off",
     },
   },
   { languageOptions: { globals: globals.node } },
   {
-    ignores: ["node_modules/", "dist/"],
+    files: ["examples/**/*.{js,mjs,cjs,ts}"],
+    rules: {
+      "jsdoc/require-jsdoc": "off",
+      "no-console": "off",
+    },
+  },
+  {
+    files: ["**/*.spec.ts"],
+    rules: {
+      "@typescript-eslint/no-require-imports": "off",
+      "no-console": "off",
+    },
+  },
+  {
+    ignores: ["**/dist/**", "**/node_modules/**"],
   },
 ];

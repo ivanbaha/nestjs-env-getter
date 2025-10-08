@@ -1,14 +1,15 @@
-import { Test, type TestingModule } from "@nestjs/testing";
+import { Test, TestingModule } from "@nestjs/testing";
 import { EnvGetterService } from "../env-getter.service";
 
 describe("Env Getter Service", () => {
   let service: EnvGetterService;
 
   beforeEach(async () => {
-    const app: TestingModule = await Test.createTestingModule({ providers: [EnvGetterService] }).compile();
+    const app: TestingModule = await Test.createTestingModule({
+      providers: [EnvGetterService],
+    }).compile();
 
     service = app.get<EnvGetterService>(EnvGetterService);
-
     jest.spyOn(service as any, "stopProcess").mockImplementation();
   });
 
@@ -251,6 +252,98 @@ describe("Env Getter Service", () => {
       expect(service["stopProcess"]).toHaveBeenCalledWith(
         `The validation func of EnvGetterService.getRequiredArray('TEST_ARRAY') must return either boolean or string\nTrace mocked stack trace`,
       );
+    });
+  });
+
+  describe("getOptionalConfigFromFile", () => {
+    afterEach(() => {
+      // Clean up any watchers to prevent interference between tests
+      service.onModuleDestroy();
+    });
+
+    it("should return undefined when file doesn't exist and no default value provided", () => {
+      const result = service.getOptionalConfigFromFile("non-existent-file.json");
+      expect(result).toBeUndefined();
+      expect(service["stopProcess"]).not.toHaveBeenCalled();
+    });
+
+    it("should return default value when file doesn't exist", () => {
+      const defaultValue = { key: "default" };
+      const result = service.getOptionalConfigFromFile("non-existent-file.json", defaultValue);
+      expect(result).toEqual(defaultValue);
+      expect(result).toHaveProperty("on"); // Should have event methods
+      expect(service["stopProcess"]).not.toHaveBeenCalled();
+    });
+
+    it("should return undefined when file exists but has invalid JSON and no default value", () => {
+      // Create a temporary file with invalid JSON
+      const fs = require("fs");
+      const path = require("path");
+      const tempFile = path.join(process.cwd(), "temp-invalid.json");
+
+      try {
+        fs.writeFileSync(tempFile, "{ invalid json }");
+
+        const result = service.getOptionalConfigFromFile("temp-invalid.json");
+        expect(result).toBeUndefined();
+        expect(service["stopProcess"]).not.toHaveBeenCalled();
+      } finally {
+        // Clean up
+        if (fs.existsSync(tempFile)) {
+          fs.unlinkSync(tempFile);
+        }
+      }
+    });
+
+    it("should return default value when file exists but has invalid JSON", () => {
+      // Create a temporary file with invalid JSON
+      const fs = require("fs");
+      const path = require("path");
+      const tempFile = path.join(process.cwd(), "temp-invalid2.json");
+      const defaultValue = { key: "default" };
+
+      try {
+        fs.writeFileSync(tempFile, "{ invalid json }");
+
+        const result = service.getOptionalConfigFromFile("temp-invalid2.json", defaultValue);
+        expect(result).toEqual(defaultValue);
+        expect(result).toHaveProperty("on"); // Should have event methods
+        expect(service["stopProcess"]).not.toHaveBeenCalled();
+      } finally {
+        // Clean up
+        if (fs.existsSync(tempFile)) {
+          fs.unlinkSync(tempFile);
+        }
+      }
+    });
+
+    it("should crash the process when validation fails even for optional config", () => {
+      // Create a temporary file with valid JSON
+      const fs = require("fs");
+      const path = require("path");
+      const tempFile = path.join(process.cwd(), "temp-valid.json");
+
+      try {
+        fs.writeFileSync(tempFile, JSON.stringify({ key: "value" }));
+
+        class TestConfig {
+          requiredField: string;
+          constructor(data: any) {
+            if (!data.requiredField) {
+              throw new Error("requiredField is required");
+            }
+            this.requiredField = data.requiredField;
+          }
+        }
+
+        service.getOptionalConfigFromFile("temp-valid.json", TestConfig);
+        expect(service["stopProcess"]).toHaveBeenCalledWith(expect.stringContaining("Validation failed"));
+      } finally {
+        // Clean up
+        if (fs.existsSync(tempFile)) {
+          fs.unlinkSync(tempFile);
+        }
+      }
     });
   });
 });
