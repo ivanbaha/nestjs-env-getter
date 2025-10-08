@@ -15,13 +15,32 @@ import {
   type WithConfigEvents,
 } from "./types";
 
+@Injectable()
 export class EnvGetterService implements OnModuleDestroy {
   /**
    * Checks if a key is considered unsafe for object assignment
    * (prototype pollution risks).
+   * @param key - The key to check.
+   * @returns True if the key is unsafe, false otherwise.
    */
-  private static isUnsafeKey(key: string): boolean {
+  private isUnsafeKey(key: string): boolean {
     return key === "__proto__" || key === "constructor" || key === "prototype";
+  }
+
+  /**
+   * Creates a safe copy of an object, filtering out unsafe keys
+   * to prevent prototype pollution.
+   * @param source - The source object to copy.
+   * @returns A safe copy of the object without unsafe keys.
+   */
+  private safeObjectCopy(source: Record<string, unknown>): Record<string, unknown> {
+    const copy: Record<string, unknown> = Object.create(null);
+    Object.keys(source)
+      .filter((key) => !this.isUnsafeKey(key))
+      .forEach((key) => {
+        copy[key] = source[key];
+      });
+    return copy;
   }
   private readonly configsStorage: Record<string, unknown> = {};
   private readonly fileWatchers = new Map<string, ReturnType<typeof watch>>();
@@ -520,10 +539,10 @@ export class EnvGetterService implements OnModuleDestroy {
 
       // If we have a default value, attach event methods to it
       if (defaultValueOrCls !== undefined) {
-        // Create a copy of the default value and attach event methods
+        // Create a safe copy of the default value and attach event methods
         const defaultWithEvents =
           typeof defaultValueOrCls === "object" && defaultValueOrCls !== null
-            ? ({ ...defaultValueOrCls } as Record<string, unknown>)
+            ? this.safeObjectCopy(defaultValueOrCls as Record<string, unknown>)
             : defaultValueOrCls;
 
         if (typeof defaultWithEvents === "object" && defaultWithEvents !== null) {
@@ -587,10 +606,10 @@ export class EnvGetterService implements OnModuleDestroy {
       } else {
         // Pattern: (filePath, defaultValue, cls?) - return default value with event methods
         if (defaultValueOrCls !== undefined) {
-          // Create a copy of the default value and attach event methods
+          // Create a safe copy of the default value and attach event methods
           const defaultWithEvents =
             typeof defaultValueOrCls === "object" && defaultValueOrCls !== null
-              ? ({ ...defaultValueOrCls } as Record<string, unknown>)
+              ? this.safeObjectCopy(defaultValueOrCls as Record<string, unknown>)
               : defaultValueOrCls;
 
           if (typeof defaultWithEvents === "object" && defaultWithEvents !== null) {
@@ -731,12 +750,12 @@ export class EnvGetterService implements OnModuleDestroy {
         // Update existing object properties to preserve references
         const configObj = existingConfig as Record<string, unknown>;
         Object.keys(configObj)
-          .filter((key) => !EnvGetterService.isUnsafeKey(key))
+          .filter((key) => !this.isUnsafeKey(key))
           .forEach((key) => delete configObj[key]);
         Object.keys(parsedConfig)
-          .filter((key) => !EnvGetterService.isUnsafeKey(key))
+          .filter((key) => !this.isUnsafeKey(key))
           .forEach((key) => {
-            if (!EnvGetterService.isUnsafeKey(key)) {
+            if (!this.isUnsafeKey(key)) {
               configObj[key] = parsedConfig[key];
             }
           });
@@ -751,7 +770,7 @@ export class EnvGetterService implements OnModuleDestroy {
         // Ensure config objects are prototype-less
         const safeParsedConfig = Object.create(null);
         Object.keys(parsedConfig)
-          .filter((key) => !EnvGetterService.isUnsafeKey(key))
+          .filter((key) => !this.isUnsafeKey(key))
           .forEach((key) => {
             safeParsedConfig[key] = parsedConfig[key];
           });
@@ -771,8 +790,16 @@ export class EnvGetterService implements OnModuleDestroy {
       if (existingInstance) {
         // Update existing instance properties to preserve references
         const instanceObj = existingInstance as Record<string, unknown>;
-        Object.keys(instanceObj).forEach((key) => delete instanceObj[key]);
-        Object.assign(instanceObj, tempInstance);
+        // Safely delete existing properties
+        Object.keys(instanceObj)
+          .filter((key) => !this.isUnsafeKey(key))
+          .forEach((key) => delete instanceObj[key]);
+        // Safely copy properties from tempInstance
+        Object.keys(tempInstance as Record<string, unknown>)
+          .filter((key) => !this.isUnsafeKey(key))
+          .forEach((key) => {
+            instanceObj[key] = (tempInstance as Record<string, unknown>)[key];
+          });
 
         // Attach event methods if not already attached
         if (!isInitialLoad) {
