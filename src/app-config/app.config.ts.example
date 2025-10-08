@@ -1,0 +1,18 @@
+import { Injectable } from "@nestjs/common";
+import { EnvGetterService } from "nestjs-env-getter";
+
+@Injectable()
+export class AppConfig {
+  // declare your config properties here, for example:
+
+  // readonly port: number;
+  // readonly mongoConnectionString: string;
+  // readonly optionalConfigBoolean?: boolean;
+
+  constructor(protected readonly envGetter: EnvGetterService) {
+    // initialize your config properties here, for example:
+    // this.port = this.envGetter.getOptionalNumericEnv("PORT", 3000);
+    // this.mongoConnectionString = this.envGetter.getRequiredEnv("MONGO_CONNECTION_STRING");
+    // this.optionalConfigBoolean = this.envGetter.getOptionalBooleanEnv("OPTIONAL_CONFIG_BOOLEAN");
+  }
+}

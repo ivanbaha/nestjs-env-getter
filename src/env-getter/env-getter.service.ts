@@ -11,6 +11,10 @@ export class EnvGetterService {
     config();
   }
 
+  private getErrorMessage(error: unknown) {
+    return error instanceof Error ? error.message : JSON.stringify(error);
+  }
+
   /**
    * Logs an error message in red and terminates the process.
    * @param message - The error message to display before exiting.
@@ -191,10 +195,8 @@ export class EnvGetterService {
 
     try {
       return new URL(envVal);
-    } catch (err) {
-      this.stopProcess(
-        `Variable '${envName}' must be a valid URL. Error: ${err instanceof Error ? err.message : JSON.stringify(err)}`,
-      );
+    } catch (err: unknown) {
+      this.stopProcess(`Variable '${envName}' must be a valid URL. Error: ${this.getErrorMessage(err)}`);
     }
   }
 
@@ -215,10 +217,8 @@ export class EnvGetterService {
 
     try {
       return envVal ? new URL(envVal) : defaultValue;
-    } catch (err) {
-      this.stopProcess(
-        `Variable '${envName}' must be a valid URL. Error: ${err instanceof Error ? err.message : JSON.stringify(err)}`,
-      );
+    } catch (err: unknown) {
+      this.stopProcess(`Variable '${envName}' must be a valid URL. Error: ${this.getErrorMessage(err)}`);
     }
   }
 
@@ -302,27 +302,27 @@ export class EnvGetterService {
    * console.log(config.apiKey); // "123"
    * console.log(config.timeout); // 5000
    */
-  getRequiredObject<R = any, C extends ClassConstructor<any> | undefined = undefined>(
+  getRequiredObject<R = unknown, C extends ClassConstructor<unknown> | undefined = undefined>(
     envName: string,
     cls?: C,
   ): C extends ClassConstructor<infer T> ? T : R {
     const envVal = this.getRequiredEnv(envName);
 
     const baseErrorMessage = `Cannot parse object from variable '${envName}'. Error:`;
-    let parsedObj: Record<string, any>;
+    let parsedObj: Record<string, unknown>;
 
     try {
       parsedObj = JSON.parse(envVal);
-    } catch (error: any) {
-      this.stopProcess(`${baseErrorMessage} ${error.message}`);
+    } catch (error: unknown) {
+      this.stopProcess(`${baseErrorMessage} ${this.getErrorMessage(error)}`);
     }
 
-    if (!cls) return parsedObj as any;
+    if (!cls) return parsedObj as C extends ClassConstructor<infer T> ? T : R;
 
     try {
-      return new cls(parsedObj);
-    } catch (error: any) {
-      this.stopProcess(`${baseErrorMessage} ${error.message}`);
+      return new cls(parsedObj) as C extends ClassConstructor<infer T> ? T : R;
+    } catch (error: unknown) {
+      this.stopProcess(`${baseErrorMessage} ${this.getErrorMessage(error)}`);
     }
   }
 
@@ -351,15 +351,15 @@ export class EnvGetterService {
    *    }
    * );
    */
-  getRequiredArray<R = any>(envName: string, validate?: ArrayValidatorType<R>): R extends any[] ? R : R[] {
+  getRequiredArray<R = unknown>(envName: string, validate?: ArrayValidatorType<R>): R extends unknown[] ? R : R[] {
     const envVal = this.getRequiredEnv(envName);
     const baseErrorMessage = `Cannot parse an array from variable '${envName}'. Error:`;
     let parsedArray: unknown[];
 
     try {
       parsedArray = JSON.parse(envVal);
-    } catch (error: any) {
-      this.stopProcess(`${baseErrorMessage} ${error.message}`);
+    } catch (error: unknown) {
+      this.stopProcess(`${baseErrorMessage} ${this.getErrorMessage(error)}`);
     }
 
     if (!Array.isArray(parsedArray)) this.stopProcess(`'${envName}' must be a stringified array`);
@@ -367,7 +367,7 @@ export class EnvGetterService {
     if (typeof validate === "function") {
       // validate each element of parsed array
       parsedArray.forEach((el, i) => {
-        const result = (validate as ArrayValidatorType<R>)(el, i, parsedArray as any);
+        const result = (validate as ArrayValidatorType<R>)(el, i, parsedArray as R extends unknown[] ? R : R[]);
 
         // check if validator works correct
         if (!["boolean", "string"].includes(typeof result) || result === "")
@@ -383,6 +383,6 @@ export class EnvGetterService {
       });
     }
 
-    return parsedArray as R extends any[] ? R : R[];
+    return parsedArray as R extends unknown[] ? R : R[];
   }
 }

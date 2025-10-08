@@ -53,6 +53,7 @@ export default [
       "jsdoc/check-tag-names": "warn",
       "jsdoc/no-bad-blocks": "warn",
       "jsdoc/sort-tags": "warn",
+      "jsdoc/require-throws-type": "off",
     },
   },
   { languageOptions: { globals: globals.node } },
