@@ -82,10 +82,6 @@ export class MongoConnectionService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  /**
-   * Masks sensitive parts of the connection string for logging
-   * Used for safe logging of config values loaded via nestjs-env-getter
-   */
   private maskConnectionString(uri: string): string {
     try {
       const url = new URL(uri);
@@ -98,10 +94,6 @@ export class MongoConnectionService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  /**
-   * Get current connection status
-   * Uses mongoose connection states
-   */
   getConnectionStatus(): string {
     const states = {
       0: 'disconnected',
@@ -109,6 +101,6 @@ export class MongoConnectionService implements OnModuleInit, OnModuleDestroy {
       2: 'connecting',
       3: 'disconnecting',
     };
-    return states[this.connection.readyState] || 'unknown';
+    return states[this.connection.readyState as keyof typeof states] || 'unknown';
   }
 }

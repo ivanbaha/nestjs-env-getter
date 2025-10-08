@@ -13,7 +13,7 @@ export class EnvGetterService {
   private readonly fileWatchers = new Map<string, ReturnType<typeof watch>>();
 
   constructor() {
-    config();
+    config({ quiet: true });
   }
 
   /**
@@ -365,7 +365,6 @@ export class EnvGetterService {
    * // Without class validation
    * const config = this.envGetter.getRequiredConfigFromFile<{ apiKey: string }>('config.json');
    * console.log(config.apiKey);
-   *
    * @example
    * // With class validation
    * class MongoCredentials {
@@ -377,7 +376,6 @@ export class EnvGetterService {
    * }
    * const creds = this.envGetter.getRequiredConfigFromFile('mongo-creds.json', MongoCredentials);
    * console.log(creds.connectionString);
-   *
    * @example
    * // Disable file watching
    * const config = this.envGetter.getRequiredConfigFromFile('config.json', undefined, { enabled: false });
@@ -425,12 +423,10 @@ export class EnvGetterService {
    * // Without default value
    * const config = this.envGetter.getOptionalConfigFromFile<{ apiKey?: string }>('config.json');
    * if (config) console.log(config.apiKey);
-   *
    * @example
    * // With default value
    * const config = this.envGetter.getOptionalConfigFromFile('config.json', { apiKey: 'default' });
    * console.log(config.apiKey);
-   *
    * @example
    * // With class validation
    * class TestConfig {
@@ -659,7 +655,7 @@ export class EnvGetterService {
   ): void {
     const watcherOptions: Required<FileWatcherOptions> = {
       enabled: options?.enabled ?? true,
-      debounceMs: options?.debounceMs ?? 500,
+      debounceMs: options?.debounceMs ?? 200,
     };
 
     if (!watcherOptions.enabled || this.fileWatchers.has(filePath)) return;

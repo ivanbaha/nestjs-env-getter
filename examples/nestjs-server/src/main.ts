@@ -3,6 +3,7 @@ import { AppModule } from './app.module';
 import { AppConfig } from './app.config';
 
 // Bootstrap the NestJS app using port from config loaded by nestjs-env-getter
+
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 

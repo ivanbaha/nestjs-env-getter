@@ -58,6 +58,12 @@ export default [
   },
   { languageOptions: { globals: globals.node } },
   {
-    ignores: ["node_modules/", "dist/"],
+    files: ["examples/**/*.{js,mjs,cjs,ts}"],
+    rules: {
+      "jsdoc/require-jsdoc": "off",
+    },
+  },
+  {
+    ignores: ["**/dist/**", "**/node_modules/**"],
   },
 ];
