@@ -282,7 +282,7 @@ Load and validate configuration from JSON files with automatic file watching and
 
 - **`getOptionalConfigFromFile<T>(filePath: string, defaultValue?: T, cls?: ClassConstructor<T>, watcherOptions?: FileWatcherOptions): T | undefined`**
 
-  Reads an optional JSON configuration file. Returns the default value if the file doesn't exist.
+  Reads an optional JSON configuration file. Returns the default value if the file doesn't exist or cannot be parsed as JSON. Only terminates the process if validation fails (when using a class constructor).
 
   ```typescript
   // With class validation
@@ -301,7 +301,25 @@ Load and validate configuration from JSON files with automatic file watching and
     "configs/test-configs.json",
     TestConfig,
   );
+
+  // With default value - gracefully handles missing files and JSON parsing errors
+  const config = this.envGetter.getOptionalConfigFromFile(
+    "optional-config.json",
+    { fallbackValue: "default" },
+  );
+
+  // Note: Optional config files are graceful - missing files or JSON parsing errors
+  // return the default value (or undefined). Only validation errors crash the process.
   ```
+
+#### ⚠️ Important: Error Handling Behavior
+
+**Required vs Optional Config Files:**
+
+- **`getRequiredConfigFromFile`**: Crashes the process if the file is missing, has invalid JSON, or fails validation.
+- **`getOptionalConfigFromFile`**: Only crashes the process on validation errors (when using class constructors). Missing files or JSON parsing errors gracefully return the default value or `undefined`.
+
+This design ensures that optional configurations truly are optional - your application won't crash due to missing or malformed optional config files, but validation constraints are still enforced when files are present and parsable.
 
 #### ⚠️ Important: Using Config Values by Reference
 
@@ -373,7 +391,9 @@ When the file watcher detects changes, it updates the **same object instance** i
 - ✅ File watching with automatic change detection
 - ✅ Debouncing to prevent excessive re-reads
 - ✅ Class-based validation with constructor pattern
-- ✅ Process termination on invalid JSON or validation errors
+- ✅ **Graceful error handling for optional configs** - missing files or JSON parsing errors return default values
+- ✅ Process termination only on validation errors (required configs crash on any error)
+- ✅ **Event methods attached to default values** - consistent API even when files don't exist
 - ✅ No application restart needed - changes apply immediately when using object references
 
 ## License

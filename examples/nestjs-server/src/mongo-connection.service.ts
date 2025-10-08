@@ -8,7 +8,6 @@ import { AppConfig } from './app.config';
 export class MongoConnectionService implements OnModuleInit, OnModuleDestroy {
   // Use NestJS Logger for logging connection events
   private readonly logger: Logger = new Logger('MongoConnectionService');
-  private checkInterval: NodeJS.Timeout | null = null;
   private lastConnectionString: string;
   private isReconnecting = false;
 
@@ -18,6 +17,12 @@ export class MongoConnectionService implements OnModuleInit, OnModuleDestroy {
     private readonly config: AppConfig,
   ) {
     this.lastConnectionString = this.config.mongoConfigs.connectionString;
+
+    // Subscribe to config file changes
+    this.config.mongoConfigs.on('updated', (event) => {
+      this.logger.log(`🔔 MongoDB config updated from ${event.filePath}`);
+      this.handleConfigUpdate();
+    });
   }
 
   async onModuleInit() {
@@ -33,21 +38,14 @@ export class MongoConnectionService implements OnModuleInit, OnModuleDestroy {
     this.connection.on('error', (error) => {
       this.logger.error('❌ MongoDB connection error:', error);
     });
-
-    // Periodically check for config changes and reconnect if needed
-    this.checkInterval = setInterval(() => {
-      this.checkAndReconnect();
-    }, 2000);
   }
 
   onModuleDestroy() {
-    if (this.checkInterval) {
-      clearInterval(this.checkInterval);
-    }
+    // Event listeners are automatically cleaned up by EnvGetterService.onModuleDestroy()
   }
 
-  // Checks for changes in MongoDB connection string and reconnects if needed
-  private async checkAndReconnect() {
+  // Handles config updates triggered by file change events
+  private async handleConfigUpdate() {
     if (this.isReconnecting) {
       return; // Avoid concurrent reconnection attempts
     }

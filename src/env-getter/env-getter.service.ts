@@ -1,19 +1,46 @@
 import { config } from "dotenv";
+import { EventEmitter } from "events";
 import { existsSync, readFileSync, watch } from "fs";
 import { join, isAbsolute } from "path";
 
-import { Injectable } from "@nestjs/common";
+import { Injectable, OnModuleDestroy } from "@nestjs/common";
 
 import { type ClassConstructor, isTimePeriod, parseTimePeriod, TimeMarker } from "../shared";
-import { type ArrayValidatorType, type FileWatcherOptions } from "./types";
+import {
+  type ArrayValidatorType,
+  type ConfigErrorEvent,
+  type ConfigUpdatedEvent,
+  type Disposable,
+  type FileWatcherOptions,
+  type WithConfigEvents,
+} from "./types";
 
 @Injectable()
-export class EnvGetterService {
-  private readonly configsStorage: Record<string, any> = {};
+export class EnvGetterService implements OnModuleDestroy {
+  private readonly configsStorage: Record<string, unknown> = {};
   private readonly fileWatchers = new Map<string, ReturnType<typeof watch>>();
+
+  /**
+   * Event emitter for config file change events.
+   * Emits 'updated' and 'error' events globally for all config files.
+   */
+  readonly events = new EventEmitter();
 
   constructor() {
     config({ quiet: true });
+  }
+
+  /**
+   * Lifecycle hook called when the module is being destroyed.
+   * Cleans up all file watchers and event listeners.
+   */
+  onModuleDestroy() {
+    // Close all file watchers
+    this.fileWatchers.forEach((watcher) => watcher.close());
+    this.fileWatchers.clear();
+
+    // Remove all event listeners
+    this.events.removeAllListeners();
   }
 
   /**
@@ -384,41 +411,43 @@ export class EnvGetterService {
     filePath: string,
     cls?: C,
     watcherOptions?: FileWatcherOptions,
-  ): C extends ClassConstructor<infer T> ? T : R {
+  ): C extends ClassConstructor<infer T> ? WithConfigEvents<T> : WithConfigEvents<R> {
     const absolutePath = this.resolveFilePath(filePath);
 
     if (!existsSync(absolutePath)) this.stopProcess(`Config file '${absolutePath}' does not exist.`);
 
     // Check if already cached, return cached value
     if (absolutePath in this.configsStorage) {
-      return this.configsStorage[absolutePath] as C extends ClassConstructor<infer T> ? T : R;
+      return this.configsStorage[absolutePath] as C extends ClassConstructor<infer T>
+        ? WithConfigEvents<T>
+        : WithConfigEvents<R>;
     }
 
     // Read and parse the file for the first time
     const config = this.readAndParseConfigFile<R, C>(absolutePath, cls);
 
     // Setup file watcher
-    this.setupFileWatcher(absolutePath, cls, watcherOptions);
+    this.setupFileWatcher(absolutePath, cls, watcherOptions, false);
 
-    return config;
+    return config as C extends ClassConstructor<infer T> ? WithConfigEvents<T> : WithConfigEvents<R>;
   }
 
   /**
    * Retrieves and parses an optional configuration from a JSON file.
    * - If the file exists, reads and parses the JSON content.
-   * - If the file doesn't exist and a default value is provided, returns the default value.
-   * - If the file doesn't exist and no default value is provided, returns undefined.
+   * - If the file doesn't exist or cannot be parsed, returns the default value (if provided) or undefined.
+   * - Default values are enhanced with event methods for consistency.
    * - Optionally validates and instantiates using a provided class.
    * - Sets up a file watcher to automatically reload the config on file changes (if file exists).
-   * - Terminates the process if the file exists but cannot be parsed or fails validation.
+   * - Only terminates the process if validation fails (when using a class constructor).
    * @template R - The expected type of the parsed config.
    * @template C - The class constructor type (if provided).
    * @param filePath - The path to the config file (absolute or relative to process.cwd()).
-   * @param defaultValue - (Optional) The default value to return if the file doesn't exist.
+   * @param defaultValue - (Optional) The default value to return if the file doesn't exist or cannot be parsed.
    * @param cls - (Optional) A class constructor to validate and instantiate the parsed config.
    * @param watcherOptions - (Optional) Configuration for file watching behavior.
-   * @returns The parsed config, the default value, or undefined. The returned value will always reflect the latest file content if the file exists.
-   * @throws Terminates the process if the file exists but cannot be parsed or fails validation.
+   * @returns The parsed config, the default value (with event methods), or undefined. The returned value will always reflect the latest file content if the file exists.
+   * @throws Terminates the process only if validation fails (when using a class constructor).
    * @example
    * // Without default value
    * const config = this.envGetter.getOptionalConfigFromFile<{ apiKey?: string }>('config.json');
@@ -446,41 +475,70 @@ export class EnvGetterService {
     filePath: string,
     cls: C,
     watcherOptions: FileWatcherOptions,
-  ): InstanceType<C> | undefined;
+  ): WithConfigEvents<InstanceType<C>> | undefined;
   getOptionalConfigFromFile<R, C extends ClassConstructor<unknown>>(
     filePath: string,
     defaultValue: R,
     cls: C,
     watcherOptions: FileWatcherOptions,
-  ): InstanceType<C>;
+  ): WithConfigEvents<InstanceType<C>>;
   getOptionalConfigFromFile<R, C extends ClassConstructor<unknown>>(
     filePath: string,
     defaultValue: R,
     cls: C,
-  ): InstanceType<C>;
-  getOptionalConfigFromFile<C extends ClassConstructor<unknown>>(filePath: string, cls: C): InstanceType<C> | undefined;
-  getOptionalConfigFromFile<R>(filePath: string, defaultValue: R): R;
-  getOptionalConfigFromFile<R = unknown>(filePath: string): R | undefined;
+  ): WithConfigEvents<InstanceType<C>>;
+  getOptionalConfigFromFile<C extends ClassConstructor<unknown>>(
+    filePath: string,
+    cls: C,
+  ): WithConfigEvents<InstanceType<C>> | undefined;
+  getOptionalConfigFromFile<R>(filePath: string, defaultValue: R): WithConfigEvents<R>;
+  getOptionalConfigFromFile<R = unknown>(filePath: string): WithConfigEvents<R> | undefined;
   getOptionalConfigFromFile<R = unknown, C extends ClassConstructor<unknown> | undefined = undefined>(
     filePath: string,
     defaultValueOrCls?: R | C,
     clsOrWatcherOptions?: C | FileWatcherOptions,
     watcherOptions?: FileWatcherOptions,
-  ): any {
+  ): C extends ClassConstructor<infer T>
+    ? WithConfigEvents<T> | WithConfigEvents<R> | undefined
+    : WithConfigEvents<R> | undefined {
     const absolutePath = this.resolveFilePath(filePath);
 
     // If file doesn't exist
     if (!existsSync(absolutePath)) {
       // Check if defaultValueOrCls is a class constructor
       if (typeof defaultValueOrCls === "function") {
-        return undefined;
+        return undefined as C extends ClassConstructor<infer T>
+          ? WithConfigEvents<T> | WithConfigEvents<R> | undefined
+          : WithConfigEvents<R> | undefined;
       }
-      return defaultValueOrCls;
+
+      // If we have a default value, attach event methods to it
+      if (defaultValueOrCls !== undefined) {
+        // Create a copy of the default value and attach event methods
+        const defaultWithEvents =
+          typeof defaultValueOrCls === "object" && defaultValueOrCls !== null
+            ? ({ ...defaultValueOrCls } as Record<string, unknown>)
+            : defaultValueOrCls;
+
+        if (typeof defaultWithEvents === "object" && defaultWithEvents !== null) {
+          this.attachEventMethods(defaultWithEvents as Record<string, unknown>, absolutePath);
+        }
+
+        return defaultWithEvents as C extends ClassConstructor<infer T>
+          ? WithConfigEvents<T> | WithConfigEvents<R> | undefined
+          : WithConfigEvents<R> | undefined;
+      }
+
+      return undefined as C extends ClassConstructor<infer T>
+        ? WithConfigEvents<T> | WithConfigEvents<R> | undefined
+        : WithConfigEvents<R> | undefined;
     }
 
     // Check if already cached, return cached value
     if (absolutePath in this.configsStorage) {
-      return this.configsStorage[absolutePath];
+      return this.configsStorage[absolutePath] as C extends ClassConstructor<infer T>
+        ? WithConfigEvents<T> | WithConfigEvents<R> | undefined
+        : WithConfigEvents<R> | undefined;
     }
 
     // Determine the parameters
@@ -502,12 +560,54 @@ export class EnvGetterService {
     }
 
     // Read and parse the file
-    const config = this.readAndParseConfigFile<R, C>(absolutePath, cls);
+    let config: C extends ClassConstructor<infer T> ? T : R;
+    try {
+      config = this.readAndParseConfigFile<R, C>(absolutePath, cls, true, false, true);
+    } catch (error: unknown) {
+      // For optional config files, return default value if file reading or JSON parsing fails
+      // Only re-throw if it's a validation error (when cls is provided and validation fails)
+      const isValidationError = cls && error instanceof Error && error.message.includes("Validation failed");
+
+      if (isValidationError) {
+        // Always crash on validation errors, even for optional configs
+        throw error;
+      }
+
+      if (typeof defaultValueOrCls === "function") {
+        // Pattern: (filePath, cls) - no default value, return undefined
+        return undefined as C extends ClassConstructor<infer T>
+          ? WithConfigEvents<T> | WithConfigEvents<R> | undefined
+          : WithConfigEvents<R> | undefined;
+      } else {
+        // Pattern: (filePath, defaultValue, cls?) - return default value with event methods
+        if (defaultValueOrCls !== undefined) {
+          // Create a copy of the default value and attach event methods
+          const defaultWithEvents =
+            typeof defaultValueOrCls === "object" && defaultValueOrCls !== null
+              ? ({ ...defaultValueOrCls } as Record<string, unknown>)
+              : defaultValueOrCls;
+
+          if (typeof defaultWithEvents === "object" && defaultWithEvents !== null) {
+            this.attachEventMethods(defaultWithEvents as Record<string, unknown>, absolutePath);
+          }
+
+          return defaultWithEvents as C extends ClassConstructor<infer T>
+            ? WithConfigEvents<T> | WithConfigEvents<R> | undefined
+            : WithConfigEvents<R> | undefined;
+        }
+
+        return undefined as C extends ClassConstructor<infer T>
+          ? WithConfigEvents<T> | WithConfigEvents<R> | undefined
+          : WithConfigEvents<R> | undefined;
+      }
+    }
 
     // Setup file watcher
-    this.setupFileWatcher(absolutePath, cls, options);
+    this.setupFileWatcher(absolutePath, cls, options, true);
 
-    return config;
+    return config as C extends ClassConstructor<infer T>
+      ? WithConfigEvents<T> | WithConfigEvents<R> | undefined
+      : WithConfigEvents<R> | undefined;
   }
 
   /*****************************************************************************************
@@ -580,13 +680,19 @@ export class EnvGetterService {
    * @template R - The expected type of the parsed config.
    * @param filePath - The absolute path to the config file.
    * @param cls - (Optional) A class constructor to validate and instantiate the parsed config.
+   * @param isInitialLoad - Whether this is the initial load (true) or a re-parse (false). Events are only emitted on re-parse.
+   * @param breakOnError - Whether to stop the process on errors. Only applies when isInitialLoad is false.
+   * @param isOptional - Whether this is for an optional config file. If true, file reading and JSON parsing errors are thrown without crashing the process, but validation errors still crash the process.
    * @returns The parsed config, optionally instantiated as an instance of `cls`.
-   * @throws Terminates the process if the file cannot be read, parsed, or validated.
+   * @throws Terminates the process if the file cannot be read, parsed, or validated (on initial load or if breakOnError is true). For optional configs, only validation errors crash the process, other errors are thrown.
    * @private
    */
   private readAndParseConfigFile<R = unknown, C extends ClassConstructor<unknown> | undefined = undefined>(
     filePath: string,
     cls?: C,
+    isInitialLoad: boolean = true,
+    breakOnError: boolean = true,
+    isOptional: boolean = false,
   ): C extends ClassConstructor<infer T> ? T : R {
     const baseErrorMessage = `Cannot read config from file '${filePath}'.`;
 
@@ -594,14 +700,22 @@ export class EnvGetterService {
     try {
       fileContent = readFileSync(filePath, "utf-8");
     } catch (error: unknown) {
-      this.stopProcess(`${baseErrorMessage} Error reading file: ${this.getErrorMessage(error)}`);
+      const err = error instanceof Error ? error : new Error(this.getErrorMessage(error));
+      if ((isInitialLoad || breakOnError) && !isOptional) {
+        this.stopProcess(`${baseErrorMessage} Error reading file: ${err.message}`);
+      }
+      throw err;
     }
 
     let parsedConfig: Record<string, unknown>;
     try {
       parsedConfig = JSON.parse(fileContent);
     } catch (error: unknown) {
-      this.stopProcess(`${baseErrorMessage} Invalid JSON format: ${this.getErrorMessage(error)}`);
+      const err = error instanceof Error ? error : new Error(this.getErrorMessage(error));
+      if ((isInitialLoad || breakOnError) && !isOptional) {
+        this.stopProcess(`${baseErrorMessage} Invalid JSON format: ${err.message}`);
+      }
+      throw err;
     }
 
     if (!cls) {
@@ -609,11 +723,20 @@ export class EnvGetterService {
       const existingConfig = this.configsStorage[filePath];
       if (existingConfig && typeof existingConfig === "object") {
         // Update existing object properties to preserve references
-        Object.keys(existingConfig).forEach((key) => delete existingConfig[key]);
-        Object.assign(existingConfig, parsedConfig);
-        return existingConfig as C extends ClassConstructor<infer T> ? T : R;
+        const configObj = existingConfig as Record<string, unknown>;
+        Object.keys(configObj).forEach((key) => delete configObj[key]);
+        Object.assign(configObj, parsedConfig);
+
+        // Attach event methods if not already attached
+        if (!isInitialLoad) {
+          this.attachEventMethods(configObj, filePath);
+        }
+
+        return configObj as C extends ClassConstructor<infer T> ? T : R;
       } else {
         this.configsStorage[filePath] = parsedConfig;
+        // Attach event methods to the new config
+        this.attachEventMethods(parsedConfig, filePath);
         return parsedConfig as C extends ClassConstructor<infer T> ? T : R;
       }
     }
@@ -626,16 +749,32 @@ export class EnvGetterService {
       const existingInstance = this.configsStorage[filePath];
       if (existingInstance) {
         // Update existing instance properties to preserve references
-        Object.keys(existingInstance).forEach((key) => delete existingInstance[key]);
-        Object.assign(existingInstance, tempInstance);
-        return existingInstance as C extends ClassConstructor<infer T> ? T : R;
+        const instanceObj = existingInstance as Record<string, unknown>;
+        Object.keys(instanceObj).forEach((key) => delete instanceObj[key]);
+        Object.assign(instanceObj, tempInstance);
+
+        // Attach event methods if not already attached
+        if (!isInitialLoad) {
+          this.attachEventMethods(instanceObj, filePath);
+        }
+
+        return instanceObj as C extends ClassConstructor<infer T> ? T : R;
       } else {
         // First time - store the new instance
         this.configsStorage[filePath] = tempInstance;
+        // Attach event methods to the new instance
+        this.attachEventMethods(tempInstance as Record<string, unknown>, filePath);
         return tempInstance as C extends ClassConstructor<infer T> ? T : R;
       }
     } catch (error: unknown) {
-      this.stopProcess(`${baseErrorMessage} Validation failed: ${this.getErrorMessage(error)}`);
+      const err = error instanceof Error ? error : new Error(this.getErrorMessage(error));
+      // Create a proper validation error for optional configs to identify it later
+      const validationError = new Error(`Validation failed: ${err.message}`);
+      // Always crash on validation errors, even for optional configs
+      if (isInitialLoad || breakOnError) {
+        this.stopProcess(`${baseErrorMessage} Validation failed: ${err.message}`);
+      }
+      throw validationError;
     }
   }
 
@@ -643,19 +782,23 @@ export class EnvGetterService {
    * Sets up a file watcher for a configuration file.
    * - Watches for file changes and automatically re-reads and updates the cached config.
    * - Applies debouncing to avoid excessive re-reads.
+   * - Emits 'updated' or 'error' events on re-parse.
    * @param filePath - The absolute path to the config file.
    * @param cls - (Optional) A class constructor to validate and instantiate the parsed config.
    * @param options - File watcher configuration options.
+   * @param isOptional - Whether this is for an optional config file.
    * @private
    */
   private setupFileWatcher<C extends ClassConstructor<unknown> | undefined = undefined>(
     filePath: string,
     cls?: C,
     options?: FileWatcherOptions,
+    isOptional: boolean = false,
   ): void {
     const watcherOptions: Required<FileWatcherOptions> = {
       enabled: options?.enabled ?? true,
       debounceMs: options?.debounceMs ?? 200,
+      breakOnError: options?.breakOnError ?? true,
     };
 
     if (!watcherOptions.enabled || this.fileWatchers.has(filePath)) return;
@@ -667,11 +810,79 @@ export class EnvGetterService {
         if (debounceTimer) clearTimeout(debounceTimer);
 
         debounceTimer = setTimeout(() => {
-          this.readAndParseConfigFile(filePath, cls);
+          try {
+            // Re-parse the config (isInitialLoad = false, with breakOnError setting)
+            this.readAndParseConfigFile(filePath, cls, false, watcherOptions.breakOnError, isOptional);
+
+            // Emit file-specific success event
+            const event: ConfigUpdatedEvent = {
+              filePath,
+              timestamp: Date.now(),
+            };
+            this.events.emit(`updated:${filePath}`, event);
+          } catch (error: unknown) {
+            // Emit file-specific error event
+            const errorEvent: ConfigErrorEvent = {
+              filePath,
+              error: error instanceof Error ? error : new Error(String(error)),
+              timestamp: Date.now(),
+            };
+            this.events.emit(`error:${filePath}`, errorEvent);
+          }
         }, watcherOptions.debounceMs);
       }
     });
 
     this.fileWatchers.set(filePath, watcher);
+  }
+
+  /**
+   * Attaches event subscription methods to a config instance.
+   * Methods are added as non-enumerable properties so they don't interfere with serialization.
+   * @param instance - The config instance to attach methods to.
+   * @param filePath - The absolute path to the config file.
+   * @private
+   */
+  private attachEventMethods(instance: Record<string, unknown>, filePath: string): void {
+    // Check if methods are already attached
+    if (typeof instance.on === "function") return;
+
+    const emitter = this.events;
+
+    Object.defineProperty(instance, "on", {
+      enumerable: false,
+      writable: false,
+      configurable: false,
+      value: (event: string, handler: (event: ConfigUpdatedEvent | ConfigErrorEvent) => void): Disposable => {
+        const eventName = `${event}:${filePath}`;
+        emitter.on(eventName, handler);
+        return {
+          unsubscribe: () => emitter.off(eventName, handler),
+        };
+      },
+    });
+
+    Object.defineProperty(instance, "once", {
+      enumerable: false,
+      writable: false,
+      configurable: false,
+      value: (event: string, handler: (event: ConfigUpdatedEvent | ConfigErrorEvent) => void): Disposable => {
+        const eventName = `${event}:${filePath}`;
+        emitter.once(eventName, handler);
+        return {
+          unsubscribe: () => emitter.off(eventName, handler),
+        };
+      },
+    });
+
+    Object.defineProperty(instance, "off", {
+      enumerable: false,
+      writable: false,
+      configurable: false,
+      value: (event: string, handler: (event: ConfigUpdatedEvent | ConfigErrorEvent) => void): void => {
+        const eventName = `${event}:${filePath}`;
+        emitter.off(eventName, handler);
+      },
+    });
   }
 }

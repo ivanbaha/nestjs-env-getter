@@ -1,17 +1,17 @@
 import { Injectable } from '@nestjs/common';
 // Import the EnvGetterService from the nestjs-env-getter library
-import { EnvGetterService } from 'nestjs-env-getter';
+import { EnvGetterService, WithConfigEvents } from 'nestjs-env-getter';
 
 @Injectable()
 export class AppConfig {
   // Example of using nestjs-env-getter to load environment and config values
   readonly port: number;
-  mongoConfigs: MongoCredentials;
+  mongoConfigs: WithConfigEvents<MongoCredentials>;
 
   readonly testConfigString: string;
   readonly testConfigNumber: number;
   readonly testConfigBoolean: boolean;
-  testConfig?: TestConfig;
+  testConfig?: WithConfigEvents<TestConfig>;
 
   constructor(protected readonly envGetter: EnvGetterService) {
     // Load required numeric environment variable
@@ -26,11 +26,21 @@ export class AppConfig {
     this.testConfigBoolean = this.envGetter.getRequiredBooleanEnv('TEST_CONFIG_BOOLEAN');
 
     // Load optional config from a JSON file, provide defaults, and validate with TestConfig class
+    // The return type automatically includes event methods (on, once, off)
     this.testConfig = this.envGetter.getOptionalConfigFromFile(
       'configs/test-configs.json',
       { testConfigStringFromFile: 'default-value' },
       TestConfig,
+      { breakOnError: false }, // Do not break the process on re-read errors, just emit 'error' events
     );
+    // IMPORTANT: When breakOnError is false, you MUST subscribe to the 'error' event
+    // to prevent Node.js from throwing ERR_UNHANDLED_ERROR
+    if (this.testConfig) {
+      this.testConfig.on('error', (event) => {
+        console.error(`[AppConfig] Error updating config from ${event.filePath}:`, event.error.message);
+        // The app continues running with the last valid config
+      });
+    }
   }
 }
 
