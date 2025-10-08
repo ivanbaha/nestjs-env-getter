@@ -2,9 +2,9 @@ import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
-import { AppConfig } from './configs/app.config';
-import { AppConfigModule } from 'nestjs-env-getter';
+import { AppConfig } from './app.config';
 import { UsersTestModule } from './users-test/users-test.module';
+import { AppConfigModule } from 'nestjs-env-getter';
 
 @Module({
   imports: [
@@ -14,8 +14,9 @@ import { UsersTestModule } from './users-test/users-test.module';
     MongooseModule.forRootAsync({
       imports: [AppConfigModule], // import the module to be able to inject the config class
       useFactory: (config: AppConfig) => ({ uri: config.mongoConnectionString }),
-      inject: [AppConfig], // inject by class
+      inject: [AppConfig], // inject AppConfig class
     }),
+
     UsersTestModule,
   ],
   controllers: [AppController],
