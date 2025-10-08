@@ -1,58 +1,19 @@
 import { config } from "dotenv";
+import { existsSync, readFileSync, watch } from "fs";
+import { join, isAbsolute } from "path";
 
 import { Injectable } from "@nestjs/common";
 
 import { type ClassConstructor, isTimePeriod, parseTimePeriod, TimeMarker } from "../shared";
-import { type ArrayValidatorType } from "./types";
+import { type ArrayValidatorType, type FileWatcherOptions } from "./types";
 
 @Injectable()
 export class EnvGetterService {
+  private readonly configsStorage: Record<string, any> = {};
+  private readonly fileWatchers = new Map<string, ReturnType<typeof watch>>();
+
   constructor() {
     config();
-  }
-
-  private getErrorMessage(error: unknown) {
-    return error instanceof Error ? error.message : JSON.stringify(error);
-  }
-
-  /**
-   * Logs an error message in red and terminates the process.
-   * @param message - The error message to display before exiting.
-   * @throws Never returns; always exits the process.
-   * @private
-   */
-  private stopProcess(message: string): never {
-    // eslint-disable-next-line no-console
-    console.log("\x1b[31m%s\x1b[0m", message);
-    process.exit(1);
-  }
-
-  /**
-   * Checks if an environment variable exists.
-   * - If the variable is missing, the process is terminated.
-   * - If the variable exists, returns `true`.
-   * @param envName - The name of the environment variable to check.
-   * @returns `true` if the environment variable exists.
-   * @throws Terminates the process if the variable is missing.
-   * @private
-   */
-  private checkEnvExisting(envName: string): boolean | never {
-    if (!process.env.hasOwnProperty(envName)) this.stopProcess(`Missing '${envName}' environment variable`);
-    return true;
-  }
-
-  /**
-   * Validates whether an environment variable contains an allowed value.
-   * - If the variable's value is not in the allowed list, the process is terminated.
-   * @param envName - The name of the environment variable.
-   * @param envVal - The current value of the environment variable.
-   * @param allowedValues - An array of allowed values for the variable.
-   * @throws Terminates the process if `envVal` is not in the allowed list.
-   * @private
-   */
-  private checkIfEnvHasAllowedValue(envName: string, envVal: string | null, allowedValues: string[]): void | never {
-    if (!envVal || !allowedValues.includes(envVal))
-      this.stopProcess(`Variable '${envName}' can be only one of: [${allowedValues}], but received '${envVal}'`);
   }
 
   /**
@@ -384,5 +345,337 @@ export class EnvGetterService {
     }
 
     return parsedArray as R extends unknown[] ? R : R[];
+  }
+
+  /**
+   * Retrieves and parses a required configuration from a JSON file.
+   * - Ensures the file exists.
+   * - Reads and parses the JSON content.
+   * - Optionally validates and instantiates using a provided class.
+   * - Sets up a file watcher to automatically reload the config on file changes.
+   * - Terminates the process if the file is missing, cannot be parsed, or fails validation.
+   * @template R - The expected type of the parsed config.
+   * @template C - The class constructor type (if provided).
+   * @param filePath - The path to the config file (absolute or relative to process.cwd()).
+   * @param cls - (Optional) A class constructor to validate and instantiate the parsed config.
+   * @param watcherOptions - (Optional) Configuration for file watching behavior.
+   * @returns The parsed config, optionally instantiated as an instance of `cls`. The returned value will always reflect the latest file content.
+   * @throws Terminates the process if the file is missing, cannot be parsed, or fails validation.
+   * @example
+   * // Without class validation
+   * const config = this.envGetter.getRequiredConfigFromFile<{ apiKey: string }>('config.json');
+   * console.log(config.apiKey);
+   *
+   * @example
+   * // With class validation
+   * class MongoCredentials {
+   *   connectionString: string;
+   *   constructor(data: any) {
+   *     if (!data.connectionString) throw new Error("connectionString is required");
+   *     this.connectionString = data.connectionString;
+   *   }
+   * }
+   * const creds = this.envGetter.getRequiredConfigFromFile('mongo-creds.json', MongoCredentials);
+   * console.log(creds.connectionString);
+   *
+   * @example
+   * // Disable file watching
+   * const config = this.envGetter.getRequiredConfigFromFile('config.json', undefined, { enabled: false });
+   */
+  getRequiredConfigFromFile<R = unknown, C extends ClassConstructor<unknown> | undefined = undefined>(
+    filePath: string,
+    cls?: C,
+    watcherOptions?: FileWatcherOptions,
+  ): C extends ClassConstructor<infer T> ? T : R {
+    const absolutePath = this.resolveFilePath(filePath);
+
+    if (!existsSync(absolutePath)) this.stopProcess(`Config file '${absolutePath}' does not exist.`);
+
+    // Check if already cached, return cached value
+    if (absolutePath in this.configsStorage) {
+      return this.configsStorage[absolutePath] as C extends ClassConstructor<infer T> ? T : R;
+    }
+
+    // Read and parse the file for the first time
+    const config = this.readAndParseConfigFile<R, C>(absolutePath, cls);
+
+    // Setup file watcher
+    this.setupFileWatcher(absolutePath, cls, watcherOptions);
+
+    return config;
+  }
+
+  /**
+   * Retrieves and parses an optional configuration from a JSON file.
+   * - If the file exists, reads and parses the JSON content.
+   * - If the file doesn't exist and a default value is provided, returns the default value.
+   * - If the file doesn't exist and no default value is provided, returns undefined.
+   * - Optionally validates and instantiates using a provided class.
+   * - Sets up a file watcher to automatically reload the config on file changes (if file exists).
+   * - Terminates the process if the file exists but cannot be parsed or fails validation.
+   * @template R - The expected type of the parsed config.
+   * @template C - The class constructor type (if provided).
+   * @param filePath - The path to the config file (absolute or relative to process.cwd()).
+   * @param defaultValue - (Optional) The default value to return if the file doesn't exist.
+   * @param cls - (Optional) A class constructor to validate and instantiate the parsed config.
+   * @param watcherOptions - (Optional) Configuration for file watching behavior.
+   * @returns The parsed config, the default value, or undefined. The returned value will always reflect the latest file content if the file exists.
+   * @throws Terminates the process if the file exists but cannot be parsed or fails validation.
+   * @example
+   * // Without default value
+   * const config = this.envGetter.getOptionalConfigFromFile<{ apiKey?: string }>('config.json');
+   * if (config) console.log(config.apiKey);
+   *
+   * @example
+   * // With default value
+   * const config = this.envGetter.getOptionalConfigFromFile('config.json', { apiKey: 'default' });
+   * console.log(config.apiKey);
+   *
+   * @example
+   * // With class validation
+   * class TestConfig {
+   *   testConfigStringFromFile: string;
+   *
+   *   constructor(data: any) {
+   *     if (!data.testConfigStringFromFile || typeof data.testConfigStringFromFile !== 'string') {
+   *       throw new Error('testConfigStringFromFile is required and must be a string');
+   *     }
+   *     this.testConfigStringFromFile = data.testConfigStringFromFile;
+   *   }
+   * }
+   * const config = this.envGetter.getOptionalConfigFromFile('test.json', undefined, TestConfig);
+   */
+  // Most specific overloads first
+  getOptionalConfigFromFile<C extends ClassConstructor<unknown>>(
+    filePath: string,
+    cls: C,
+    watcherOptions: FileWatcherOptions,
+  ): InstanceType<C> | undefined;
+  getOptionalConfigFromFile<R, C extends ClassConstructor<unknown>>(
+    filePath: string,
+    defaultValue: R,
+    cls: C,
+    watcherOptions: FileWatcherOptions,
+  ): InstanceType<C>;
+  getOptionalConfigFromFile<R, C extends ClassConstructor<unknown>>(
+    filePath: string,
+    defaultValue: R,
+    cls: C,
+  ): InstanceType<C>;
+  getOptionalConfigFromFile<C extends ClassConstructor<unknown>>(filePath: string, cls: C): InstanceType<C> | undefined;
+  getOptionalConfigFromFile<R>(filePath: string, defaultValue: R): R;
+  getOptionalConfigFromFile<R = unknown>(filePath: string): R | undefined;
+  getOptionalConfigFromFile<R = unknown, C extends ClassConstructor<unknown> | undefined = undefined>(
+    filePath: string,
+    defaultValueOrCls?: R | C,
+    clsOrWatcherOptions?: C | FileWatcherOptions,
+    watcherOptions?: FileWatcherOptions,
+  ): any {
+    const absolutePath = this.resolveFilePath(filePath);
+
+    // If file doesn't exist
+    if (!existsSync(absolutePath)) {
+      // Check if defaultValueOrCls is a class constructor
+      if (typeof defaultValueOrCls === "function") {
+        return undefined;
+      }
+      return defaultValueOrCls;
+    }
+
+    // Check if already cached, return cached value
+    if (absolutePath in this.configsStorage) {
+      return this.configsStorage[absolutePath];
+    }
+
+    // Determine the parameters
+    let cls: C | undefined;
+    let options: FileWatcherOptions | undefined;
+
+    if (typeof defaultValueOrCls === "function") {
+      // Pattern: (filePath, cls) or (filePath, cls, watcherOptions)
+      cls = defaultValueOrCls as C;
+      options = clsOrWatcherOptions as FileWatcherOptions | undefined;
+    } else if (typeof clsOrWatcherOptions === "function") {
+      // Pattern: (filePath, defaultValue, cls) or (filePath, defaultValue, cls, watcherOptions)
+      cls = clsOrWatcherOptions as C;
+      options = watcherOptions;
+    } else {
+      // Pattern: (filePath) or (filePath, defaultValue)
+      cls = undefined;
+      options = clsOrWatcherOptions as FileWatcherOptions | undefined;
+    }
+
+    // Read and parse the file
+    const config = this.readAndParseConfigFile<R, C>(absolutePath, cls);
+
+    // Setup file watcher
+    this.setupFileWatcher(absolutePath, cls, options);
+
+    return config;
+  }
+
+  /*****************************************************************************************
+   *                                   PRIVATE METHODS                                     *
+   *****************************************************************************************/
+
+  private getErrorMessage(error: unknown) {
+    return error instanceof Error ? error.message : JSON.stringify(error);
+  }
+
+  /**
+   * Logs an error message in red and terminates the process.
+   * @param message - The error message to display before exiting.
+   * @throws Never returns; always exits the process.
+   * @private
+   */
+  private stopProcess(message: string): never {
+    // eslint-disable-next-line no-console
+    console.log("\x1b[31m%s\x1b[0m", message);
+    process.exit(1);
+  }
+
+  /**
+   * Checks if an environment variable exists.
+   * - If the variable is missing, the process is terminated.
+   * - If the variable exists, returns `true`.
+   * @param envName - The name of the environment variable to check.
+   * @returns `true` if the environment variable exists.
+   * @throws Terminates the process if the variable is missing.
+   * @private
+   */
+  private checkEnvExisting(envName: string): boolean | never {
+    if (!process.env.hasOwnProperty(envName)) this.stopProcess(`Missing '${envName}' environment variable`);
+    return true;
+  }
+
+  /**
+   * Validates whether an environment variable contains an allowed value.
+   * - If the variable's value is not in the allowed list, the process is terminated.
+   * @param envName - The name of the environment variable.
+   * @param envVal - The current value of the environment variable.
+   * @param allowedValues - An array of allowed values for the variable.
+   * @throws Terminates the process if `envVal` is not in the allowed list.
+   * @private
+   */
+  private checkIfEnvHasAllowedValue(envName: string, envVal: string | null, allowedValues: string[]): void | never {
+    if (!envVal || !allowedValues.includes(envVal))
+      this.stopProcess(`Variable '${envName}' can be only one of: [${allowedValues}], but received '${envVal}'`);
+  }
+
+  /**
+   * Resolves a file path to an absolute path.
+   * - If the path is already absolute, returns it as-is.
+   * - If the path is relative, resolves it from the current working directory.
+   * @param filePath - The file path to resolve.
+   * @returns The absolute file path.
+   * @private
+   */
+  private resolveFilePath(filePath: string): string {
+    return isAbsolute(filePath) ? filePath : join(process.cwd(), filePath);
+  }
+
+  /**
+   * Reads and parses a JSON configuration file.
+   * - Reads the file content.
+   * - Parses the JSON content.
+   * - Optionally validates and instantiates using a provided class.
+   * - Updates the cache with the parsed config.
+   * - If an instance already exists in cache, updates its properties instead of creating a new instance (preserves references).
+   * @template R - The expected type of the parsed config.
+   * @param filePath - The absolute path to the config file.
+   * @param cls - (Optional) A class constructor to validate and instantiate the parsed config.
+   * @returns The parsed config, optionally instantiated as an instance of `cls`.
+   * @throws Terminates the process if the file cannot be read, parsed, or validated.
+   * @private
+   */
+  private readAndParseConfigFile<R = unknown, C extends ClassConstructor<unknown> | undefined = undefined>(
+    filePath: string,
+    cls?: C,
+  ): C extends ClassConstructor<infer T> ? T : R {
+    const baseErrorMessage = `Cannot read config from file '${filePath}'.`;
+
+    let fileContent: string;
+    try {
+      fileContent = readFileSync(filePath, "utf-8");
+    } catch (error: unknown) {
+      this.stopProcess(`${baseErrorMessage} Error reading file: ${this.getErrorMessage(error)}`);
+    }
+
+    let parsedConfig: Record<string, unknown>;
+    try {
+      parsedConfig = JSON.parse(fileContent);
+    } catch (error: unknown) {
+      this.stopProcess(`${baseErrorMessage} Invalid JSON format: ${this.getErrorMessage(error)}`);
+    }
+
+    if (!cls) {
+      // For plain objects, check if we need to update existing object or create new one
+      const existingConfig = this.configsStorage[filePath];
+      if (existingConfig && typeof existingConfig === "object") {
+        // Update existing object properties to preserve references
+        Object.keys(existingConfig).forEach((key) => delete existingConfig[key]);
+        Object.assign(existingConfig, parsedConfig);
+        return existingConfig as C extends ClassConstructor<infer T> ? T : R;
+      } else {
+        this.configsStorage[filePath] = parsedConfig;
+        return parsedConfig as C extends ClassConstructor<infer T> ? T : R;
+      }
+    }
+
+    try {
+      // Validate by creating a temporary instance
+      const tempInstance = new cls(parsedConfig);
+
+      // Check if an instance already exists in cache
+      const existingInstance = this.configsStorage[filePath];
+      if (existingInstance) {
+        // Update existing instance properties to preserve references
+        Object.keys(existingInstance).forEach((key) => delete existingInstance[key]);
+        Object.assign(existingInstance, tempInstance);
+        return existingInstance as C extends ClassConstructor<infer T> ? T : R;
+      } else {
+        // First time - store the new instance
+        this.configsStorage[filePath] = tempInstance;
+        return tempInstance as C extends ClassConstructor<infer T> ? T : R;
+      }
+    } catch (error: unknown) {
+      this.stopProcess(`${baseErrorMessage} Validation failed: ${this.getErrorMessage(error)}`);
+    }
+  }
+
+  /**
+   * Sets up a file watcher for a configuration file.
+   * - Watches for file changes and automatically re-reads and updates the cached config.
+   * - Applies debouncing to avoid excessive re-reads.
+   * @param filePath - The absolute path to the config file.
+   * @param cls - (Optional) A class constructor to validate and instantiate the parsed config.
+   * @param options - File watcher configuration options.
+   * @private
+   */
+  private setupFileWatcher<C extends ClassConstructor<unknown> | undefined = undefined>(
+    filePath: string,
+    cls?: C,
+    options?: FileWatcherOptions,
+  ): void {
+    const watcherOptions: Required<FileWatcherOptions> = {
+      enabled: options?.enabled ?? true,
+      debounceMs: options?.debounceMs ?? 500,
+    };
+
+    if (!watcherOptions.enabled || this.fileWatchers.has(filePath)) return;
+
+    let debounceTimer: NodeJS.Timeout | null = null;
+
+    const watcher = watch(filePath, (eventType) => {
+      if (eventType === "change") {
+        if (debounceTimer) clearTimeout(debounceTimer);
+
+        debounceTimer = setTimeout(() => {
+          this.readAndParseConfigFile(filePath, cls);
+        }, watcherOptions.debounceMs);
+      }
+    });
+
+    this.fileWatchers.set(filePath, watcher);
   }
 }

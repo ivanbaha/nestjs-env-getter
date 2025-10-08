@@ -11,8 +11,27 @@ export class AppConfig {
 
   constructor(protected readonly envGetter: EnvGetterService) {
     // initialize your config properties here, for example:
+
     // this.port = this.envGetter.getOptionalNumericEnv("PORT", 3000);
     // this.mongoConnectionString = this.envGetter.getRequiredEnv("MONGO_CONNECTION_STRING");
     // this.optionalConfigBoolean = this.envGetter.getOptionalBooleanEnv("OPTIONAL_CONFIG_BOOLEAN");
+    // this.testConfig = this.envGetter.getOptionalConfigFromFile(
+    //   'configs/test-configs.json',
+    //   { testConfigStringFromFile: 'default-value' },
+    //   TestConfig,
+    // );
   }
 }
+
+// example of validation class for getting configs from file
+// class TestConfig {
+//   testConfigStringFromFile: string;
+
+//   // Used by EnvGetterService to validate the loaded config
+//   constructor(data: any) {
+//     if (!data.testConfigStringFromFile || typeof data.testConfigStringFromFile !== 'string') {
+//       throw new Error('testConfigStringFromFile is required and must be a string');
+//     }
+//     this.testConfigStringFromFile = data.testConfigStringFromFile;
+//   }
+// }

@@ -238,6 +238,144 @@ Parses a string like `'10s'`, `'5m'`, `'2h'`, `'1d'` into a numeric value.
   );
   ```
 
+### Configuration from JSON Files
+
+Load and validate configuration from JSON files with automatic file watching and hot-reload support.
+
+- **`getRequiredConfigFromFile<T>(filePath: string, cls?: ClassConstructor<T>, watcherOptions?: FileWatcherOptions): T`**
+
+  Reads a required JSON configuration file. Automatically watches for file changes and updates the cached config.
+
+  ```typescript
+  // With class validation
+  class MongoCredentials {
+    connectionString: string;
+
+    constructor(data: any) {
+      if (!data.connectionString) {
+        throw new Error("connectionString is required");
+      }
+      this.connectionString = data.connectionString;
+    }
+  }
+
+  const mongoCreds = this.envGetter.getRequiredConfigFromFile(
+    "configs/mongo-creds.json",
+    MongoCredentials,
+  );
+  console.log(mongoCreds.connectionString);
+
+  // Disable file watching
+  const staticConfig = this.envGetter.getRequiredConfigFromFile(
+    "config.json",
+    undefined,
+    { enabled: false },
+  );
+
+  // Custom debounce timing (default is 500ms)
+  const config = this.envGetter.getRequiredConfigFromFile(
+    "config.json",
+    undefined,
+    { debounceMs: 1000 },
+  );
+  ```
+
+- **`getOptionalConfigFromFile<T>(filePath: string, defaultValue?: T, cls?: ClassConstructor<T>, watcherOptions?: FileWatcherOptions): T | undefined`**
+
+  Reads an optional JSON configuration file. Returns the default value if the file doesn't exist.
+
+  ```typescript
+  // With class validation
+  class TestConfig {
+    testConfigStringFromFile: string;
+
+    constructor(data: any) {
+      if (!data.testConfigStringFromFile) {
+        throw new Error("testConfigStringFromFile is required");
+      }
+      this.testConfigStringFromFile = data.testConfigStringFromFile;
+    }
+  }
+
+  const testConfig = this.envGetter.getOptionalConfigFromFile(
+    "configs/test-configs.json",
+    TestConfig,
+  );
+  ```
+
+#### ⚠️ Important: Using Config Values by Reference
+
+To ensure your application automatically receives updated config values when files change, you **must store config objects by reference**, not by extracting primitive values:
+
+```typescript
+// ✅ CORRECT - Store the object reference
+@Injectable()
+export class AppConfig {
+  mongoConfigs: MongoCredentials; // Store the entire object
+  testConfig?: TestConfig; // Store the entire object
+
+  constructor(protected readonly envGetter: EnvGetterService) {
+    // Store references to config objects
+    this.mongoConfigs = this.envGetter.getRequiredConfigFromFile(
+      "configs/mongo-creds.json",
+      MongoCredentials,
+    );
+    this.testConfig = this.envGetter.getOptionalConfigFromFile(
+      "configs/test-configs.json",
+      TestConfig,
+    );
+  }
+}
+
+// Access via the reference - values will update automatically
+@Module({
+  imports: [
+    MongooseModule.forRootAsync({
+      useFactory: (config: AppConfig) => ({
+        uri: config.mongoConfigs.connectionString, // Access via reference
+      }),
+      inject: [AppConfig],
+    }),
+  ],
+})
+export class AppModule {}
+```
+
+```typescript
+// ❌ WRONG - Extracting primitive values breaks hot-reload
+@Injectable()
+export class AppConfig {
+  mongoConnectionString: string; // Primitive value - won't update!
+
+  constructor(protected readonly envGetter: EnvGetterService) {
+    const mongoCreds = this.envGetter.getRequiredConfigFromFile(
+      "configs/mongo-creds.json",
+      MongoCredentials,
+    );
+    // This extracts the VALUE at startup time - it won't update!
+    this.mongoConnectionString = mongoCreds.connectionString;
+  }
+}
+```
+
+When the file watcher detects changes, it updates the **same object instance** in memory. If you store the object reference, your application automatically sees the updated values. If you extract primitive values (strings, numbers, booleans), they become snapshots that never update.
+
+**File Watcher Options:**
+
+- `enabled` (boolean, default: `true`): Enable or disable automatic file watching
+- `debounceMs` (number, default: `500`): Delay in milliseconds before re-reading the file after a change
+
+**Features:**
+
+- ✅ Supports both absolute and relative paths (relative to `process.cwd()`)
+- ✅ Automatic JSON parsing and validation
+- ✅ **Hot-reload with reference preservation** - updates existing object instances in-place
+- ✅ File watching with automatic change detection
+- ✅ Debouncing to prevent excessive re-reads
+- ✅ Class-based validation with constructor pattern
+- ✅ Process termination on invalid JSON or validation errors
+- ✅ No application restart needed - changes apply immediately when using object references
+
 ## License
 
 This project is licensed under the MIT License. See the [LICENSE](./LICENSE) file for details.
