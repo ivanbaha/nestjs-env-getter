@@ -15,7 +15,6 @@ import {
   type WithConfigEvents,
 } from "./types";
 
-@Injectable()
 export class EnvGetterService implements OnModuleDestroy {
   /**
    * Checks if a key is considered unsafe for object assignment
@@ -737,7 +736,9 @@ export class EnvGetterService implements OnModuleDestroy {
         Object.keys(parsedConfig)
           .filter((key) => !EnvGetterService.isUnsafeKey(key))
           .forEach((key) => {
-            configObj[key] = parsedConfig[key];
+            if (!EnvGetterService.isUnsafeKey(key)) {
+              configObj[key] = parsedConfig[key];
+            }
           });
 
         // Attach event methods if not already attached
@@ -747,10 +748,17 @@ export class EnvGetterService implements OnModuleDestroy {
 
         return configObj as C extends ClassConstructor<infer T> ? T : R;
       } else {
-        this.configsStorage[filePath] = parsedConfig;
+        // Ensure config objects are prototype-less
+        const safeParsedConfig = Object.create(null);
+        Object.keys(parsedConfig)
+          .filter((key) => !EnvGetterService.isUnsafeKey(key))
+          .forEach((key) => {
+            safeParsedConfig[key] = parsedConfig[key];
+          });
+        this.configsStorage[filePath] = safeParsedConfig;
         // Attach event methods to the new config
-        this.attachEventMethods(parsedConfig, filePath);
-        return parsedConfig as C extends ClassConstructor<infer T> ? T : R;
+        this.attachEventMethods(safeParsedConfig, filePath);
+        return safeParsedConfig as C extends ClassConstructor<infer T> ? T : R;
       }
     }
 
