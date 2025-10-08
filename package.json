@@ -32,7 +32,7 @@
         "lint:report": "eslint",
         "test": "jest",
         "test:report": "jest --ci --coverage --runInBand",
-        "typecheck": "tsc --noEmit"
+        "typecheck": "tsc --noEmit --p tsconfig.build.json"
     },
     "peerDependencies": {
         "@nestjs/common": ">=9"

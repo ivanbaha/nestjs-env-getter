@@ -61,6 +61,14 @@ export default [
     files: ["examples/**/*.{js,mjs,cjs,ts}"],
     rules: {
       "jsdoc/require-jsdoc": "off",
+      "no-console": "off",
+    },
+  },
+  {
+    files: ["**/*.spec.ts"],
+    rules: {
+      "@typescript-eslint/no-require-imports": "off",
+      "no-console": "off",
     },
   },
   {

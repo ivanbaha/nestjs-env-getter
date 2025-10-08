@@ -9,9 +9,9 @@ export interface Disposable {
  * Event emitted when a configuration file is successfully updated and re-parsed.
  */
 export interface ConfigUpdatedEvent {
-  /** Absolute path to the config file */
+  /** Absolute path to the config file. */
   filePath: string;
-  /** Timestamp when the update occurred */
+  /** Timestamp when the update occurred. */
   timestamp: number;
 }
 
@@ -19,11 +19,11 @@ export interface ConfigUpdatedEvent {
  * Event emitted when an error occurs during config file re-parsing.
  */
 export interface ConfigErrorEvent {
-  /** Absolute path to the config file */
+  /** Absolute path to the config file. */
   filePath: string;
-  /** The error that occurred */
+  /** The error that occurred. */
   error: Error;
-  /** Timestamp when the error occurred */
+  /** Timestamp when the error occurred. */
   timestamp: number;
 }
 
