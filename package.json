@@ -1,6 +1,6 @@
 {
     "name": "nestjs-env-getter",
-    "version": "0.1.0",
+    "version": "1.0.0-beta.1",
     "description": "Environment variables getter for Nestjs applications",
     "author": "Ivan Baha",
     "private": false,
@@ -12,7 +12,8 @@
     "files": [
         "dist",
         "bin",
-        "src/app-config/app.config.ts.example"
+        "src/app-config/app.config.ts.example",
+        "CHANGELOG.md"
     ],
     "publishConfig": {
         "access": "public",

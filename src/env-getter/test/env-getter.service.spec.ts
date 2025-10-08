@@ -1,14 +1,15 @@
-import { Test, type TestingModule } from "@nestjs/testing";
+import { Test, TestingModule } from "@nestjs/testing";
 import { EnvGetterService } from "../env-getter.service";
 
 describe("Env Getter Service", () => {
   let service: EnvGetterService;
 
   beforeEach(async () => {
-    const app: TestingModule = await Test.createTestingModule({ providers: [EnvGetterService] }).compile();
+    const app: TestingModule = await Test.createTestingModule({
+      providers: [EnvGetterService],
+    }).compile();
 
     service = app.get<EnvGetterService>(EnvGetterService);
-
     jest.spyOn(service as any, "stopProcess").mockImplementation();
   });
 
