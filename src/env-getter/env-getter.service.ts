@@ -17,6 +17,13 @@ import {
 
 @Injectable()
 export class EnvGetterService implements OnModuleDestroy {
+  /**
+   * Checks if a key is considered unsafe for object assignment
+   * (prototype pollution risks).
+   */
+  private static isUnsafeKey(key: string): boolean {
+    return key === "__proto__" || key === "constructor" || key === "prototype";
+  }
   private readonly configsStorage: Record<string, unknown> = {};
   private readonly fileWatchers = new Map<string, ReturnType<typeof watch>>();
 
@@ -724,8 +731,14 @@ export class EnvGetterService implements OnModuleDestroy {
       if (existingConfig && typeof existingConfig === "object") {
         // Update existing object properties to preserve references
         const configObj = existingConfig as Record<string, unknown>;
-        Object.keys(configObj).forEach((key) => delete configObj[key]);
-        Object.assign(configObj, parsedConfig);
+        Object.keys(configObj)
+          .filter((key) => !EnvGetterService.isUnsafeKey(key))
+          .forEach((key) => delete configObj[key]);
+        Object.keys(parsedConfig)
+          .filter((key) => !EnvGetterService.isUnsafeKey(key))
+          .forEach((key) => {
+            configObj[key] = parsedConfig[key];
+          });
 
         // Attach event methods if not already attached
         if (!isInitialLoad) {
