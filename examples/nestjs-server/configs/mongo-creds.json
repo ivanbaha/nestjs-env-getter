@@ -1,3 +1,3 @@
 {
-    "connectionString": "mongodb://root:*33H1v2YKZX2i@test.oipub.com:27017/test?authSource=admin"
+    "connectionString": "mongodb://localhost:27017/test?authSource=admin"
 }
