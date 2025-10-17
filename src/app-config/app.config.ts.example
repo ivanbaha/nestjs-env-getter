@@ -9,7 +9,13 @@ export class AppConfig {
   // readonly mongoConnectionString: string;
   // readonly optionalConfigBoolean?: boolean;
 
-  constructor(protected readonly envGetter: EnvGetterService) {
+  constructor(
+    protected readonly envGetter: EnvGetterService,
+    // You can inject additional providers that were registered in AppConfigModule
+    // For example:
+    // private readonly databaseService: DatabaseService,
+    // private readonly externalApiClient: ExternalApiClient,
+  ) {
     // initialize your config properties here, for example:
 
     // this.port = this.envGetter.getOptionalNumericEnv("PORT", 3000);
@@ -20,6 +26,10 @@ export class AppConfig {
     //   { testConfigStringFromFile: 'default-value' },
     //   TestConfig,
     // );
+
+    // You can use injected providers to initialize config values:
+    // this.dynamicPort = this.databaseService.getRecommendedPort();
+    // this.apiEndpoint = this.externalApiClient.getBaseUrl();
   }
 }
 

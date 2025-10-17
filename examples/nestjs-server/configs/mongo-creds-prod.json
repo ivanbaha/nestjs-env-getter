@@ -1,0 +1,3 @@
+{
+    "connectionString": "mongodb://prod-cluster:27017/production-app?authSource=admin&ssl=true"
+}

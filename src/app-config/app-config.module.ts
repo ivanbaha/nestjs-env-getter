@@ -13,22 +13,28 @@ export interface AppConfigModuleOptions {
   useClass?: Type<unknown>;
   useFactory?: (...args: unknown[]) => unknown;
   inject?: (InjectionToken | OptionalFactoryDependency)[];
+  imports?: any[];
+  providers?: Provider[];
 }
 
 @Global()
 @Module({})
 export class AppConfigModule {
-  static forRoot(options: { useClass: Type<unknown> }): DynamicModule {
+  static forRoot(options: { useClass: Type<unknown>; imports?: any[]; providers?: Provider[] }): DynamicModule {
     const provider: Provider = { provide: options.useClass, useClass: options.useClass };
+    const additionalProviders = options.providers || [];
 
     return {
       module: AppConfigModule,
-      providers: [EnvGetterService, provider],
-      exports: [EnvGetterService, provider],
+      imports: options.imports || [],
+      providers: [EnvGetterService, provider, ...additionalProviders],
+      exports: [EnvGetterService, provider, ...additionalProviders],
     };
   }
 
   static forRootAsync(options: AppConfigModuleOptions): DynamicModule {
+    const additionalProviders = options.providers || [];
+
     if (options.useFactory) {
       const provider: Provider = {
         provide: "APP_CONFIG",
@@ -38,8 +44,9 @@ export class AppConfigModule {
 
       return {
         module: AppConfigModule,
-        providers: [EnvGetterService, provider],
-        exports: [EnvGetterService, provider],
+        imports: options.imports || [],
+        providers: [EnvGetterService, provider, ...additionalProviders],
+        exports: [EnvGetterService, provider, ...additionalProviders],
       };
     }
 
@@ -49,8 +56,9 @@ export class AppConfigModule {
 
       return {
         module: AppConfigModule,
-        providers: [EnvGetterService, provider],
-        exports: [EnvGetterService, provider],
+        imports: options.imports || [],
+        providers: [EnvGetterService, provider, ...additionalProviders],
+        exports: [EnvGetterService, provider, ...additionalProviders],
       };
     }
 
