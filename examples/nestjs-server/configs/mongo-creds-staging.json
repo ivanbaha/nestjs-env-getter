@@ -1,0 +1,3 @@
+{
+    "connectionString": "mongodb://staging-db:27017/staging-app?authSource=admin"
+}

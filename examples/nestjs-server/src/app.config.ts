@@ -1,10 +1,14 @@
+/* eslint-disable @typescript-eslint/no-unsafe-assignment */
+/* eslint-disable @typescript-eslint/no-unsafe-member-access */
 import { Injectable } from '@nestjs/common';
 // Import the EnvGetterService from the nestjs-env-getter library
 import { EnvGetterService, WithConfigEvents } from 'nestjs-env-getter';
+import { AppConfigOptionsService } from './app-config-options.service';
 
 @Injectable()
 export class AppConfig {
   // Example of using nestjs-env-getter to load environment and config values
+  // This class now demonstrates how to inject additional providers via AppConfigModule
   readonly port: number;
   mongoConfigs: WithConfigEvents<MongoCredentials>;
 
@@ -13,25 +17,35 @@ export class AppConfig {
   readonly testConfigBoolean: boolean;
   testConfig?: WithConfigEvents<TestConfig>;
 
-  constructor(protected readonly envGetter: EnvGetterService) {
+  constructor(
+    protected readonly envGetter: EnvGetterService,
+    private readonly configOptions: AppConfigOptionsService,
+  ) {
+    // Get configuration options from the injected service
+    const options = this.configOptions.getConfigOptions();
+
     // Load required numeric environment variable
     this.port = this.envGetter.getRequiredNumericEnv('PORT');
 
-    // Load required config from a JSON file and validate with MongoCredentials class
-    this.mongoConfigs = this.envGetter.getRequiredConfigFromFile('configs/mongo-creds.json', MongoCredentials);
+    // Load required config from a JSON file using dynamic filename from options
+    // This demonstrates how injected providers can control configuration behavior
+    this.mongoConfigs = this.envGetter.getRequiredConfigFromFile(options.mongoCredentialsFile, MongoCredentials);
 
     // Load required string, number, and boolean environment variables
     this.testConfigString = this.envGetter.getRequiredEnv('TEST_CONFIG_STRING');
     this.testConfigNumber = this.envGetter.getRequiredNumericEnv('TEST_CONFIG_NUMBER');
     this.testConfigBoolean = this.envGetter.getRequiredBooleanEnv('TEST_CONFIG_BOOLEAN');
 
-    // Load optional config from a JSON file, provide defaults, and validate with TestConfig class
+    // Load optional config from a JSON file using dynamic filename and options
     // The return type automatically includes event methods (on, once, off)
     this.testConfig = this.envGetter.getOptionalConfigFromFile(
-      'configs/test-configs.json',
+      options.testConfigFile,
       { testConfigStringFromFile: 'default-value' },
       TestConfig,
-      { breakOnError: false }, // Do not break the process on re-read errors, just emit 'error' events
+      {
+        breakOnError: false, // Do not break the process on re-read errors, just emit 'error' events
+        // File watching is controlled by the options service based on environment
+      },
     );
     // IMPORTANT: When breakOnError is false, you MUST subscribe to the 'error' event
     // to prevent Node.js from throwing ERR_UNHANDLED_ERROR

@@ -1,6 +1,6 @@
-export { ArrayValidatorType } from "./array-validator.type";
-export { FileWatcherOptions } from "./file-watcher-options.type";
-export {
+export type { ArrayValidatorType } from "./array-validator.type";
+export type { FileWatcherOptions } from "./file-watcher-options.type";
+export type {
   ConfigUpdatedEvent,
   ConfigErrorEvent,
   ConfigEventType,
