@@ -38,3 +38,5 @@ jobs:
       - install
       - build
     uses: ./.github/workflows/publish.job.yml
+    permissions:
+      id-token: write
