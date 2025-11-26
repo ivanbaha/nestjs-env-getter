@@ -1,9 +1,12 @@
 on:
   workflow_call:
-
+    secrets:
+      NPM_REGISTRY_PAT:
+        description: "NPM Registry Personal Access Token to publish packages"
+        required: true
 permissions:
   contents: write
-  id-token: write
+  id-token: write # required for provenance support
 
 jobs:
   publish:
@@ -18,7 +21,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "20"
-          registry-url: "https://registry.npmjs.org"
 
       - name: Restore dist from cache
         uses: actions/cache@v4
@@ -27,6 +29,9 @@ jobs:
           key: ${{ runner.os }}-dist-${{ github.sha }}
           restore-keys: |
             ${{ runner.os }}-dist-
+
+      - name: Configure npm auth
+        run: echo "//registry.npmjs.org/:_authToken=${{ secrets.NPM_REGISTRY_PAT }}" > ~/.npmrc
 
       - name: Publish package to npm
         run: npm publish --provenance --access public

@@ -1,51 +1,26 @@
-name: Release and Publish
+on:
+  workflow_call:
+    secrets:
+      NPM_REGISTRY_PAT:
+        description: "NPM Registry Personal Access Token to publish packages"
+        required: true
 permissions:
   contents: write
-  id-token: write
-  packages: write
-
-on:
-  workflow_dispatch:
-  release:
-    types: [published]
+  id-token: write # required for provenance support
 
 jobs:
-  install:
-    uses: ./.github/workflows/install.job.yml
-
-  lint:
-    needs: install
-    uses: ./.github/workflows/lint.job.yml
-
-  typecheck:
-    needs: install
-    uses: ./.github/workflows/typecheck.job.yml
-
-  tests:
-    needs: install
-    uses: ./.github/workflows/unit-tests.job.yml
-
-  build:
-    needs:
-      - install
-      - lint
-      - typecheck
-      - tests
-    uses: ./.github/workflows/build.job.yml
-
   publish:
     name: Publish to NPM
     runs-on: ubuntu-latest
-    needs:
-      - build
-
-    permissions:
-      contents: read
-      id-token: write
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
 
       - name: Restore dist from cache
         uses: actions/cache@v4
@@ -55,11 +30,8 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-dist-
 
-      - name: Set up Node.js for Publish
-        uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-          registry-url: "https://registry.npmjs.org"
+      - name: Configure npm auth
+        run: echo "//registry.npmjs.org/:_authToken=${{ secrets.NPM_REGISTRY_PAT }}" > ~/.npmrc
 
-      - name: Publish package to npm (Verbose)
-        run: npm publish --provenance --access public --loglevel verbose
+      - name: Publish package to npm
+        run: npm publish --provenance --access public
