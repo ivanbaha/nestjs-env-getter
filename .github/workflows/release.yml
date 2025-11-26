@@ -39,4 +39,5 @@ jobs:
       - build
     uses: ./.github/workflows/publish.job.yml
     permissions:
+      contents: write
       id-token: write
