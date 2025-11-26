@@ -10,7 +10,7 @@ export type FileWatcherOptions = {
 
   /**
    * Debounce delay in milliseconds before re-reading the file after a change is detected.
-   * @default 200
+   * @default 350
    */
   debounceMs?: number;
 

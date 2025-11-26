@@ -346,4 +346,214 @@ describe("Env Getter Service", () => {
       }
     });
   });
+
+  describe("File Watcher - File Replacement", () => {
+    const fs = require("fs");
+    const path = require("path");
+    let tempFile: string;
+
+    beforeEach(() => {
+      tempFile = path.join(process.cwd(), `temp-watcher-${Date.now()}.json`);
+    });
+
+    afterEach((done) => {
+      // Clean up watchers and files
+      service.onModuleDestroy();
+      if (fs.existsSync(tempFile)) {
+        fs.unlinkSync(tempFile);
+      }
+      // Give some time for file system operations to complete
+      setTimeout(done, 100);
+    });
+
+    it("should re-establish watcher after file change event", (done) => {
+      // Create initial file
+      const initialData = { value: "initial" };
+      fs.writeFileSync(tempFile, JSON.stringify(initialData));
+
+      // Load config with watcher enabled
+      const config = service.getRequiredConfigFromFile<{ value: string }>(tempFile, undefined, {
+        enabled: true,
+        debounceMs: 100,
+      });
+
+      expect(config.value).toBe("initial");
+
+      let updateCount = 0;
+      config.on("updated", () => {
+        updateCount++;
+
+        // After first update, verify watcher still works by triggering another update
+        if (updateCount === 1) {
+          expect(config.value).toBe("updated");
+          // Trigger second update
+          setTimeout(() => {
+            fs.writeFileSync(tempFile, JSON.stringify({ value: "second-update" }));
+          }, 150);
+        } else if (updateCount === 2) {
+          expect(config.value).toBe("second-update");
+          done();
+        }
+      });
+
+      // Trigger first file change
+      setTimeout(() => {
+        fs.writeFileSync(tempFile, JSON.stringify({ value: "updated" }));
+      }, 150);
+    }, 10000);
+
+    it("should handle file replacement (Vault agent scenario)", (done) => {
+      // Create initial file
+      const initialData = { connectionString: "mongodb://initial" };
+      fs.writeFileSync(tempFile, JSON.stringify(initialData));
+
+      // Load config with watcher enabled
+      const config = service.getRequiredConfigFromFile<{ connectionString: string }>(tempFile, undefined, {
+        enabled: true,
+        debounceMs: 100,
+      });
+
+      expect(config.connectionString).toBe("mongodb://initial");
+
+      let updateCount = 0;
+      config.on("updated", () => {
+        updateCount++;
+
+        if (updateCount === 1) {
+          expect(config.connectionString).toBe("mongodb://replaced");
+          // Trigger another replacement to verify watcher was re-established
+          setTimeout(() => {
+            const tempNewFile = `${tempFile}.new`;
+            fs.writeFileSync(tempNewFile, JSON.stringify({ connectionString: "mongodb://second-replacement" }));
+            fs.renameSync(tempNewFile, tempFile);
+          }, 150);
+        } else if (updateCount === 2) {
+          expect(config.connectionString).toBe("mongodb://second-replacement");
+          done();
+        }
+      });
+
+      // Simulate Vault agent file replacement: write to temp file, then rename
+      setTimeout(() => {
+        const tempNewFile = `${tempFile}.new`;
+        fs.writeFileSync(tempNewFile, JSON.stringify({ connectionString: "mongodb://replaced" }));
+        fs.renameSync(tempNewFile, tempFile);
+      }, 150);
+    }, 10000);
+
+    it("should emit error event when file is deleted", (done) => {
+      // Create initial file
+      const initialData = { value: "test" };
+      fs.writeFileSync(tempFile, JSON.stringify(initialData));
+
+      // Load config with watcher enabled
+      const config = service.getRequiredConfigFromFile<{ value: string }>(tempFile, undefined, {
+        enabled: true,
+        debounceMs: 100,
+      });
+
+      config.on("error", (event) => {
+        expect(event.error.message).toContain("was deleted");
+        expect(event.filePath).toBe(tempFile);
+        done();
+      });
+
+      // Delete the file after a delay
+      setTimeout(() => {
+        fs.unlinkSync(tempFile);
+        // Trigger a change event by trying to write (which will fail, but watcher will detect deletion)
+        setTimeout(() => {
+          if (fs.existsSync(tempFile)) {
+            fs.writeFileSync(tempFile, "trigger");
+          }
+        }, 50);
+      }, 150);
+    }, 5000);
+
+    it("should handle both change and rename events", (done) => {
+      // Create initial file
+      const initialData = { value: "initial" };
+      fs.writeFileSync(tempFile, JSON.stringify(initialData));
+
+      // Load config with watcher enabled
+      const config = service.getRequiredConfigFromFile<{ value: string }>(tempFile, undefined, {
+        enabled: true,
+        debounceMs: 100,
+      });
+
+      let eventCount = 0;
+      config.on("updated", () => {
+        eventCount++;
+        if (eventCount === 1) {
+          expect(config.value).toBe("changed");
+          // Now trigger a rename event
+          setTimeout(() => {
+            const tempNewFile = `${tempFile}.new`;
+            fs.writeFileSync(tempNewFile, JSON.stringify({ value: "renamed" }));
+            fs.renameSync(tempNewFile, tempFile);
+          }, 150);
+        } else if (eventCount === 2) {
+          expect(config.value).toBe("renamed");
+          done();
+        }
+      });
+
+      // First trigger a regular change event
+      setTimeout(() => {
+        fs.writeFileSync(tempFile, JSON.stringify({ value: "changed" }));
+      }, 150);
+    }, 10000);
+
+    it("should respect custom debounce time of 350ms", (done) => {
+      // Create initial file
+      const initialData = { value: "initial" };
+      fs.writeFileSync(tempFile, JSON.stringify(initialData));
+
+      const startTime = Date.now();
+
+      // Load config with default watcher options (350ms debounce)
+      const config = service.getRequiredConfigFromFile<{ value: string }>(tempFile);
+
+      config.on("updated", () => {
+        const elapsed = Date.now() - startTime;
+        // Should be at least 350ms due to debounce
+        expect(elapsed).toBeGreaterThanOrEqual(300); // Allow some margin
+        expect(config.value).toBe("updated");
+        done();
+      });
+
+      // Trigger file change immediately
+      setTimeout(() => {
+        fs.writeFileSync(tempFile, JSON.stringify({ value: "updated" }));
+      }, 50);
+    }, 5000);
+
+    it("should allow disabling file watcher", (done) => {
+      // Create initial file
+      const initialData = { value: "initial" };
+      fs.writeFileSync(tempFile, JSON.stringify(initialData));
+
+      // Load config with watcher disabled
+      const config = service.getRequiredConfigFromFile<{ value: string }>(tempFile, undefined, {
+        enabled: false,
+      });
+
+      let updateCalled = false;
+      config.on("updated", () => {
+        updateCalled = true;
+      });
+
+      // Change file
+      setTimeout(() => {
+        fs.writeFileSync(tempFile, JSON.stringify({ value: "changed" }));
+      }, 100);
+
+      // Wait and verify no update event was emitted
+      setTimeout(() => {
+        expect(updateCalled).toBe(false);
+        expect(config.value).toBe("initial"); // Should still have old value
+        done();
+      }, 500);
+    }, 2000);
+  });
 });
