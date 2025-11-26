@@ -272,7 +272,7 @@ Load and validate configuration from JSON files with automatic file watching and
     { enabled: false },
   );
 
-  // Custom debounce timing (default is 200ms)
+  // Custom debounce timing (default is 350ms)
   const config = this.envGetter.getRequiredConfigFromFile(
     "config.json",
     undefined,
@@ -381,14 +381,14 @@ When the file watcher detects changes, it updates the **same object instance** i
 **File Watcher Options:**
 
 - `enabled` (boolean, default: `true`): Enable or disable automatic file watching
-- `debounceMs` (number, default: `200`): Delay in milliseconds before re-reading the file after a change
+- `debounceMs` (number, default: `350`): Delay in milliseconds before re-reading the file after a change
 
 **Features:**
 
 - ✅ Supports both absolute and relative paths (relative to `process.cwd()`)
 - ✅ Automatic JSON parsing and validation
 - ✅ **Hot-reload with reference preservation** - updates existing object instances in-place
-- ✅ File watching with automatic change detection
+- ✅ File watching with automatic change detection and file replacement support (e.g., Vault agent flow)
 - ✅ Debouncing to prevent excessive re-reads
 - ✅ Class-based validation with constructor pattern
 - ✅ **Graceful error handling for optional configs** - missing files or JSON parsing errors return default values

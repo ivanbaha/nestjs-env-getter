@@ -830,6 +830,7 @@ export class EnvGetterService implements OnModuleDestroy {
    * Sets up a file watcher for a configuration file.
    * - Watches for file changes and automatically re-reads and updates the cached config.
    * - Applies debouncing to avoid excessive re-reads.
+   * - Re-establishes the watcher after each successful update to handle file replacements (e.g., Vault agent flow).
    * - Emits 'updated' or 'error' events on re-parse.
    * @param filePath - The absolute path to the config file.
    * @param cls - (Optional) A class constructor to validate and instantiate the parsed config.
@@ -845,22 +846,49 @@ export class EnvGetterService implements OnModuleDestroy {
   ): void {
     const watcherOptions: Required<FileWatcherOptions> = {
       enabled: options?.enabled ?? true,
-      debounceMs: options?.debounceMs ?? 200,
+      debounceMs: options?.debounceMs ?? 350,
       breakOnError: options?.breakOnError ?? true,
     };
 
-    if (!watcherOptions.enabled || this.fileWatchers.has(filePath)) return;
+    if (!watcherOptions.enabled) return;
+
+    // Close existing watcher if present (for re-establishment)
+    const existingWatcher = this.fileWatchers.get(filePath);
+    if (existingWatcher) {
+      existingWatcher.close();
+      this.fileWatchers.delete(filePath);
+    }
 
     let debounceTimer: NodeJS.Timeout | null = null;
 
     const watcher = watch(filePath, (eventType) => {
-      if (eventType === "change") {
+      // Handle both "change" and "rename" events to catch file replacements
+      if (eventType === "change" || eventType === "rename") {
         if (debounceTimer) clearTimeout(debounceTimer);
 
         debounceTimer = setTimeout(() => {
+          // Verify file still exists before attempting to read
+          if (!existsSync(filePath)) {
+            // File was deleted, emit error event
+            const errorEvent: ConfigErrorEvent = {
+              filePath,
+              error: new Error(`Config file '${filePath}' was deleted`),
+              timestamp: Date.now(),
+            };
+            this.events.emit(`error:${filePath}`, errorEvent);
+            return;
+          }
+
           try {
             // Re-parse the config (isInitialLoad = false, with breakOnError setting)
             this.readAndParseConfigFile(filePath, cls, false, watcherOptions.breakOnError, isOptional);
+
+            // Close the old watcher
+            watcher.close();
+            this.fileWatchers.delete(filePath);
+
+            // Re-establish the watcher to handle file replacement scenarios (e.g., Vault agent)
+            this.setupFileWatcher(filePath, cls, options, isOptional);
 
             // Emit file-specific success event
             const event: ConfigUpdatedEvent = {
