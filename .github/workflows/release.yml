@@ -61,5 +61,5 @@ jobs:
           node-version: "20"
           registry-url: "https://registry.npmjs.org"
 
-      - name: Publish package to npm
-        run: npm publish --provenance --access public
+      - name: Publish package to npm (Verbose)
+        run: npm publish --provenance --access public --loglevel verbose
