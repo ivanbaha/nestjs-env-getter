@@ -47,6 +47,9 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Ensure latest npm version for OIDC
+        run: npm install -g npm@latest
+
       - name: Restore dist from cache
         uses: actions/cache@v4
         with:
