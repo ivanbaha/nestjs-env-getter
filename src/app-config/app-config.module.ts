@@ -6,6 +6,7 @@ import {
   Type,
   InjectionToken,
   OptionalFactoryDependency,
+  ModuleMetadata,
 } from "@nestjs/common";
 import { EnvGetterService } from "../env-getter/env-getter.service";
 
@@ -13,7 +14,7 @@ export interface AppConfigModuleOptions {
   useClass?: Type<unknown>;
   useFactory?: (...args: unknown[]) => unknown;
   inject?: (InjectionToken | OptionalFactoryDependency)[];
-  imports?: any[];
+  imports?: ModuleMetadata["imports"];
   providers?: Provider[];
 }
 
