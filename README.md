@@ -8,8 +8,21 @@
 - **Built-in Validation**: Validate variables against allowed values or use custom validation functions.
 - **Required vs. Optional**: Clearly distinguish between required variables that terminate the process if missing and optional ones with default values.
 - **Error Handling**: Automatically terminates the process with a descriptive error message if a required variable is missing or invalid.
-- **`.env` Support**: Automatically loads environment variables from a `.env` file using `dotenv`.
+- **`.env` Support**: Built-in parser with variable interpolation, multiline strings, and system env priority.
 - **Configuration Scaffolding**: Includes a CLI helper to quickly set up a centralized configuration file.
+
+## Environment File Parsing
+
+The module includes a zero-dependency `.env` file parser. Key behaviors:
+
+- **System environment priority**: Variables already set in `process.env` are NOT overwritten by `.env` file values. This ensures CI/CD and Docker environment injections take precedence over local files.
+- **Variable interpolation**: Use `${VAR_NAME}` syntax to reference other variables.
+- **Quoting rules**:
+  - **Unquoted**: Value ends at `#` (comment) or end of line.
+  - **Single quotes** (`'`): Raw literal, no escape processing.
+  - **Double quotes** (`"`): Supports `\n`, `\t`, `\\`, `\"` escapes and multiline values.
+- **`export` prefix**: Automatically stripped for shell compatibility.
+- **Empty values**: `KEY=` results in an empty string (not undefined).
 
 ## Installation
 

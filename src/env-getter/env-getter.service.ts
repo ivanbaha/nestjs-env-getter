@@ -1,4 +1,4 @@
-import { config } from "dotenv";
+import { loadEnvFile } from "../shared/utils";
 import { EventEmitter } from "events";
 import { existsSync, readFileSync, watch } from "fs";
 import { join, isAbsolute } from "path";
@@ -35,11 +35,11 @@ export class EnvGetterService implements OnModuleDestroy {
    */
   private safeObjectCopy(source: Record<string, unknown>): Record<string, unknown> {
     const copy: Record<string, unknown> = Object.create(null);
-    Object.keys(source)
-      .filter((key) => !this.isUnsafeKey(key))
-      .forEach((key) => {
+    for (const key of Object.keys(source)) {
+      if (!this.isUnsafeKey(key)) {
         copy[key] = source[key];
-      });
+      }
+    }
     return copy;
   }
   private readonly configsStorage: Record<string, unknown> = {};
@@ -52,7 +52,7 @@ export class EnvGetterService implements OnModuleDestroy {
   readonly events = new EventEmitter();
 
   constructor() {
-    config({ quiet: true });
+    loadEnvFile(".env", { quiet: true });
   }
 
   /**
@@ -651,8 +651,8 @@ export class EnvGetterService implements OnModuleDestroy {
    */
   private stopProcess(message: string): never {
     // eslint-disable-next-line no-console
-    console.log("\x1b[31m%s\x1b[0m", message);
-    process.exit(1);
+    console.error(`\x1b[31m${message}\x1b[0m`);
+    throw new Error(message);
   }
 
   /**

@@ -3,7 +3,6 @@
 import { Injectable } from '@nestjs/common';
 // Import the EnvGetterService from the nestjs-env-getter library
 import { EnvGetterService, WithConfigEvents } from 'nestjs-env-getter';
-import { AppConfigOptionsService } from './app-config-options.service';
 
 @Injectable()
 export class AppConfig {
@@ -17,34 +16,38 @@ export class AppConfig {
   readonly testConfigBoolean: boolean;
   testConfig?: WithConfigEvents<TestConfig>;
 
-  constructor(
-    protected readonly envGetter: EnvGetterService,
-    private readonly configOptions: AppConfigOptionsService,
-  ) {
-    // Get configuration options from the injected service
-    const options = this.configOptions.getConfigOptions();
+  // Additional examples for new parser features
+  readonly singleQuotedVal: string;
+  readonly doubleQuotedVal: string;
+  readonly privateKey: string;
+  readonly appName: string;
+  readonly appTitle: string;
+  readonly baseUrl: string;
+  readonly databaseUrl: string;
+  readonly emptyVal: string;
+  readonly allowedDomains: string[];
+  readonly complexConfig: ComplexConfig;
+  readonly simpleConfig: SimpleConfig;
 
+  constructor(protected readonly envGetter: EnvGetterService) {
     // Load required numeric environment variable
     this.port = this.envGetter.getRequiredNumericEnv('PORT');
 
-    // Load required config from a JSON file using dynamic filename from options
-    // This demonstrates how injected providers can control configuration behavior
-    this.mongoConfigs = this.envGetter.getRequiredConfigFromFile(options.mongoCredentialsFile, MongoCredentials);
+    // Load required config from a JSON file using hardcoded path
+    this.mongoConfigs = this.envGetter.getRequiredConfigFromFile('configs/mongo-creds.json', MongoCredentials);
 
     // Load required string, number, and boolean environment variables
     this.testConfigString = this.envGetter.getRequiredEnv('TEST_CONFIG_STRING');
     this.testConfigNumber = this.envGetter.getRequiredNumericEnv('TEST_CONFIG_NUMBER');
     this.testConfigBoolean = this.envGetter.getRequiredBooleanEnv('TEST_CONFIG_BOOLEAN');
 
-    // Load optional config from a JSON file using dynamic filename and options
-    // The return type automatically includes event methods (on, once, off)
+    // Load optional config from a JSON file using hardcoded path
     this.testConfig = this.envGetter.getOptionalConfigFromFile(
-      options.testConfigFile,
+      'configs/test-configs.json',
       { testConfigStringFromFile: 'default-value' },
       TestConfig,
       {
         breakOnError: false, // Do not break the process on re-read errors, just emit 'error' events
-        // File watching is controlled by the options service based on environment
       },
     );
     // IMPORTANT: When breakOnError is false, you MUST subscribe to the 'error' event
@@ -55,6 +58,29 @@ export class AppConfig {
         // The app continues running with the last valid config
       });
     }
+
+    // Load new variables for demonstration
+    this.singleQuotedVal = this.envGetter.getRequiredEnv('SINGLE_QUOTED_VAL');
+    this.doubleQuotedVal = this.envGetter.getRequiredEnv('DOUBLE_QUOTED_VAL');
+    this.privateKey = this.envGetter.getRequiredEnv('PRIVATE_KEY');
+    this.appName = this.envGetter.getRequiredEnv('APP_NAME');
+    this.appTitle = this.envGetter.getRequiredEnv('APP_TITLE');
+    this.baseUrl = this.envGetter.getRequiredEnv('BASE_URL');
+    this.databaseUrl = this.envGetter.getRequiredEnv('DATABASE_URL');
+    this.emptyVal = this.envGetter.getOptionalEnv('EMPTY_VAL', 'fallback');
+
+    // Load array environment variable with validation
+    this.allowedDomains = this.envGetter.getRequiredArray<string>('ALLOWED_DOMAINS', (val) => {
+      if (typeof val !== 'string') return 'Each domain must be a string';
+      if (!val.includes('.')) return 'Invalid domain format';
+      return true;
+    });
+
+    // Load multiline object environment variable with class validation
+    this.complexConfig = this.envGetter.getRequiredObject('COMPLEX_CONFIG', ComplexConfig);
+
+    // Load simple multiline object (single-quoted, no escapes)
+    this.simpleConfig = this.envGetter.getRequiredObject('SIMPLE_CONFIG', SimpleConfig);
   }
 }
 
@@ -81,5 +107,49 @@ class TestConfig {
       throw new Error('testConfigStringFromFile is required and must be a string');
     }
     this.testConfigStringFromFile = data.testConfigStringFromFile;
+  }
+}
+
+class ComplexConfig {
+  featureEnabled: boolean;
+  maxUsers: number;
+  apiEndpoint: string;
+  retryConfig: {
+    count: number;
+    interval: number;
+  };
+
+  constructor(data: any) {
+    if (typeof data.featureEnabled !== 'boolean') throw new Error('featureEnabled is required (boolean)');
+    if (typeof data.maxUsers !== 'number') throw new Error('maxUsers is required (number)');
+    if (typeof data.apiEndpoint !== 'string') throw new Error('apiEndpoint is required (string)');
+    if (
+      !data.retryConfig ||
+      typeof data.retryConfig.count !== 'number' ||
+      typeof data.retryConfig.interval !== 'number'
+    ) {
+      throw new Error('retryConfig is required with count and interval as numbers');
+    }
+
+    this.featureEnabled = data.featureEnabled;
+    this.maxUsers = data.maxUsers;
+    this.apiEndpoint = data.apiEndpoint;
+    this.retryConfig = data.retryConfig;
+  }
+}
+
+class SimpleConfig {
+  name: string;
+  version: number;
+  enabled: boolean;
+
+  constructor(data: any) {
+    if (typeof data.name !== 'string') throw new Error('name is required (string)');
+    if (typeof data.version !== 'number') throw new Error('version is required (number)');
+    if (typeof data.enabled !== 'boolean') throw new Error('enabled is required (boolean)');
+
+    this.name = data.name;
+    this.version = data.version;
+    this.enabled = data.enabled;
   }
 }

@@ -7,6 +7,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0] - 2026-01-17
+
+### Added
+
+- **Custom .env Parser**: Replaced `dotenv` dependency with a robust, custom-built parser.
+  - Full support for multiline strings (e.g., private keys).
+  - Variable interpolation/expansion (e.g., `APP_URL=${HOST}:${PORT}`).
+  - Detection of circular variable references.
+  - Detailed error reporting for malformed lines and unterminated quotes.
+  - Support for `export` prefix and miscellaneous quoting styles (single/double).
+
+### Changed
+
+- **Dependency Removal**: Removed `dotenv` to reduce external dependencies and control parsing logic directly.
+- **Example Project**: Updated `nestjs-server` example to demonstrate new parser features and diverse variable types.
+
 ## [1.0.0-beta.3] - 2025-11-26
 
 ### Added
