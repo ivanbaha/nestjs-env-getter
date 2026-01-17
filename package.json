@@ -1,6 +1,6 @@
 {
     "name": "nestjs-env-getter",
-    "version": "1.0.0-beta.3",
+    "version": "1.0.0",
     "description": "Environment variables getter for Nestjs applications",
     "author": "Ivan Baha",
     "private": false,
