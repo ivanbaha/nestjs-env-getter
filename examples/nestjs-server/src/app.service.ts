@@ -38,6 +38,9 @@ export class AppService implements OnModuleInit {
     this.logger.log(`BASE_URL: ${this.config.baseUrl}`);
     this.logger.log(`DATABASE_URL: ${this.config.databaseUrl}`);
     this.logger.log(`EMPTY_VAL: "${this.config.emptyVal}"`);
+    this.logger.log(`ALLOWED_DOMAINS: ${JSON.stringify(this.config.allowedDomains)}`);
+    this.logger.log(`COMPLEX_CONFIG: ${JSON.stringify(this.config.complexConfig, null, 2)}`);
+    this.logger.log(`SIMPLE_CONFIG: ${JSON.stringify(this.config.simpleConfig, null, 2)}`);
 
     this.logger.log('--- Multiline Variable (RSA Key) ---');
     this.logger.log(this.config.privateKey);

@@ -25,6 +25,9 @@ export class AppConfig {
   readonly baseUrl: string;
   readonly databaseUrl: string;
   readonly emptyVal: string;
+  readonly allowedDomains: string[];
+  readonly complexConfig: ComplexConfig;
+  readonly simpleConfig: SimpleConfig;
 
   constructor(protected readonly envGetter: EnvGetterService) {
     // Load required numeric environment variable
@@ -65,6 +68,19 @@ export class AppConfig {
     this.baseUrl = this.envGetter.getRequiredEnv('BASE_URL');
     this.databaseUrl = this.envGetter.getRequiredEnv('DATABASE_URL');
     this.emptyVal = this.envGetter.getOptionalEnv('EMPTY_VAL', 'fallback');
+
+    // Load array environment variable with validation
+    this.allowedDomains = this.envGetter.getRequiredArray<string>('ALLOWED_DOMAINS', (val) => {
+      if (typeof val !== 'string') return 'Each domain must be a string';
+      if (!val.includes('.')) return 'Invalid domain format';
+      return true;
+    });
+
+    // Load multiline object environment variable with class validation
+    this.complexConfig = this.envGetter.getRequiredObject('COMPLEX_CONFIG', ComplexConfig);
+
+    // Load simple multiline object (single-quoted, no escapes)
+    this.simpleConfig = this.envGetter.getRequiredObject('SIMPLE_CONFIG', SimpleConfig);
   }
 }
 
@@ -91,5 +107,49 @@ class TestConfig {
       throw new Error('testConfigStringFromFile is required and must be a string');
     }
     this.testConfigStringFromFile = data.testConfigStringFromFile;
+  }
+}
+
+class ComplexConfig {
+  featureEnabled: boolean;
+  maxUsers: number;
+  apiEndpoint: string;
+  retryConfig: {
+    count: number;
+    interval: number;
+  };
+
+  constructor(data: any) {
+    if (typeof data.featureEnabled !== 'boolean') throw new Error('featureEnabled is required (boolean)');
+    if (typeof data.maxUsers !== 'number') throw new Error('maxUsers is required (number)');
+    if (typeof data.apiEndpoint !== 'string') throw new Error('apiEndpoint is required (string)');
+    if (
+      !data.retryConfig ||
+      typeof data.retryConfig.count !== 'number' ||
+      typeof data.retryConfig.interval !== 'number'
+    ) {
+      throw new Error('retryConfig is required with count and interval as numbers');
+    }
+
+    this.featureEnabled = data.featureEnabled;
+    this.maxUsers = data.maxUsers;
+    this.apiEndpoint = data.apiEndpoint;
+    this.retryConfig = data.retryConfig;
+  }
+}
+
+class SimpleConfig {
+  name: string;
+  version: number;
+  enabled: boolean;
+
+  constructor(data: any) {
+    if (typeof data.name !== 'string') throw new Error('name is required (string)');
+    if (typeof data.version !== 'number') throw new Error('version is required (number)');
+    if (typeof data.enabled !== 'boolean') throw new Error('enabled is required (boolean)');
+
+    this.name = data.name;
+    this.version = data.version;
+    this.enabled = data.enabled;
   }
 }

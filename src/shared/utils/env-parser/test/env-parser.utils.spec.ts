@@ -109,6 +109,30 @@ Line 3'`;
         const result = parseEnvString(content);
         expect(result.variables.MULTILINE_SINGLE).toBe("Line 1\nLine 2\nLine 3");
       });
+
+      it("should handle multiline double-quoted strings with escaped quotes", () => {
+        const content = `COMPLEX_JSON="{
+  \\"name\\": \\"test\\",
+  \\"value\\": 123
+}"`;
+        const result = parseEnvString(content);
+        expect(result.variables.COMPLEX_JSON).toContain('"name"');
+        expect(result.variables.COMPLEX_JSON).toContain('"value"');
+        const parsed = JSON.parse(result.variables.COMPLEX_JSON!);
+        expect(parsed.name).toBe("test");
+        expect(parsed.value).toBe(123);
+      });
+
+      it("should handle multiline single-quoted JSON object (no escape needed)", () => {
+        const content = `SIMPLE_JSON='{
+"enabled": true,
+"count": 42
+}'`;
+        const result = parseEnvString(content);
+        const parsed = JSON.parse(result.variables.SIMPLE_JSON!);
+        expect(parsed.enabled).toBe(true);
+        expect(parsed.count).toBe(42);
+      });
     });
 
     describe("Complex Data Structures", () => {
@@ -415,8 +439,6 @@ ANOTHER-BAD=value`;
   });
 
   describe("loadEnvFile", () => {
-
-
     beforeEach(() => {
       // Clean up test env vars
       Object.keys(process.env).forEach((key) => {

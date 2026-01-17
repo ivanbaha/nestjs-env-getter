@@ -169,16 +169,39 @@ function parseLine(
 } {
   // If we're in multiline mode, continue accumulating
   if (buffer) {
-    const closingIndex = line.indexOf(buffer.quoteChar);
-    if (closingIndex !== -1) {
-      // Found closing quote
-      buffer.value += "\n" + line.substring(0, closingIndex);
-      return { key: buffer.key, value: buffer.value, isComplete: true, buffer: null };
-    } else {
-      // Continue accumulating
+    if (buffer.quoteChar === "'") {
+      const closingIndex = line.indexOf("'");
+      if (closingIndex !== -1) {
+        // Found closing single quote
+        buffer.value += "\n" + line.substring(0, closingIndex);
+        return { key: buffer.key, value: buffer.value, isComplete: true, buffer: null };
+      }
+    } else if (buffer.quoteChar === '"') {
+      // Double-quoted multiline - scan for non-escaped quote
+      let i = 0;
+      let collected = "";
+      while (i < line.length) {
+        if (line[i] === "\\" && i + 1 < line.length) {
+          // Preserve escape sequence
+          collected += (line[i] ?? "") + (line[i + 1] ?? "");
+          i += 2;
+        } else if (line[i] === '"') {
+          // Found closing double quote
+          buffer.value += "\n" + collected;
+          return { key: buffer.key, value: processEscapes(buffer.value), isComplete: true, buffer: null };
+        } else {
+          collected += line[i];
+          i++;
+        }
+      }
+      // Not found on this line, append entire line (literal including escapes)
       buffer.value += "\n" + line;
       return { isComplete: false, buffer };
     }
+
+    // Continue accumulating for other cases (should be handled above but for safety)
+    buffer.value += "\n" + line;
+    return { isComplete: false, buffer };
   }
 
   // Trim leading whitespace (but preserve for error reporting)
