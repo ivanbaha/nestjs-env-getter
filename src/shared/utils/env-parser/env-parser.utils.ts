@@ -386,8 +386,18 @@ export function parseEnvFile(filePath: string, options: EnvParseOptions = {}): E
     const content = readFileSync(filePath, "utf-8");
     return parseEnvString(content, options);
   } catch (err) {
-    if (err instanceof Error && err.message.startsWith("Line ")) {
-      throw err; // Re-throw parsing errors
+    // parseEnvString throws for all parse errors (unterminated quotes, invalid keys, etc.)
+    if (err instanceof Error) {
+      // Check if this is a file-system error (not a parsing error)
+      const isFileSystemError =
+        err.message.includes("ENOENT") ||
+        err.message.includes("EACCES") ||
+        err.message.includes("EPERM") ||
+        err.message.startsWith("Error reading file");
+
+      if (!isFileSystemError) {
+        throw err; // Re-throw parsing errors
+      }
     }
 
     const error = createError(

@@ -3,7 +3,6 @@
 import { Injectable } from '@nestjs/common';
 // Import the EnvGetterService from the nestjs-env-getter library
 import { EnvGetterService, WithConfigEvents } from 'nestjs-env-getter';
-import { AppConfigOptionsService } from './app-config-options.service';
 
 @Injectable()
 export class AppConfig {
@@ -17,34 +16,35 @@ export class AppConfig {
   readonly testConfigBoolean: boolean;
   testConfig?: WithConfigEvents<TestConfig>;
 
-  constructor(
-    protected readonly envGetter: EnvGetterService,
-    private readonly configOptions: AppConfigOptionsService,
-  ) {
-    // Get configuration options from the injected service
-    const options = this.configOptions.getConfigOptions();
+  // Additional examples for new parser features
+  readonly singleQuotedVal: string;
+  readonly doubleQuotedVal: string;
+  readonly privateKey: string;
+  readonly appName: string;
+  readonly appTitle: string;
+  readonly baseUrl: string;
+  readonly databaseUrl: string;
+  readonly emptyVal: string;
 
+  constructor(protected readonly envGetter: EnvGetterService) {
     // Load required numeric environment variable
     this.port = this.envGetter.getRequiredNumericEnv('PORT');
 
-    // Load required config from a JSON file using dynamic filename from options
-    // This demonstrates how injected providers can control configuration behavior
-    this.mongoConfigs = this.envGetter.getRequiredConfigFromFile(options.mongoCredentialsFile, MongoCredentials);
+    // Load required config from a JSON file using hardcoded path
+    this.mongoConfigs = this.envGetter.getRequiredConfigFromFile('configs/mongo-creds.json', MongoCredentials);
 
     // Load required string, number, and boolean environment variables
     this.testConfigString = this.envGetter.getRequiredEnv('TEST_CONFIG_STRING');
     this.testConfigNumber = this.envGetter.getRequiredNumericEnv('TEST_CONFIG_NUMBER');
     this.testConfigBoolean = this.envGetter.getRequiredBooleanEnv('TEST_CONFIG_BOOLEAN');
 
-    // Load optional config from a JSON file using dynamic filename and options
-    // The return type automatically includes event methods (on, once, off)
+    // Load optional config from a JSON file using hardcoded path
     this.testConfig = this.envGetter.getOptionalConfigFromFile(
-      options.testConfigFile,
+      'configs/test-configs.json',
       { testConfigStringFromFile: 'default-value' },
       TestConfig,
       {
         breakOnError: false, // Do not break the process on re-read errors, just emit 'error' events
-        // File watching is controlled by the options service based on environment
       },
     );
     // IMPORTANT: When breakOnError is false, you MUST subscribe to the 'error' event
@@ -55,6 +55,16 @@ export class AppConfig {
         // The app continues running with the last valid config
       });
     }
+
+    // Load new variables for demonstration
+    this.singleQuotedVal = this.envGetter.getRequiredEnv('SINGLE_QUOTED_VAL');
+    this.doubleQuotedVal = this.envGetter.getRequiredEnv('DOUBLE_QUOTED_VAL');
+    this.privateKey = this.envGetter.getRequiredEnv('PRIVATE_KEY');
+    this.appName = this.envGetter.getRequiredEnv('APP_NAME');
+    this.appTitle = this.envGetter.getRequiredEnv('APP_TITLE');
+    this.baseUrl = this.envGetter.getRequiredEnv('BASE_URL');
+    this.databaseUrl = this.envGetter.getRequiredEnv('DATABASE_URL');
+    this.emptyVal = this.envGetter.getOptionalEnv('EMPTY_VAL', 'fallback');
   }
 }
 

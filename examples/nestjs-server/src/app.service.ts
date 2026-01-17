@@ -1,9 +1,9 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 // Import AppConfig to access configuration values loaded by nestjs-env-getter
 import { AppConfig } from './app.config';
 
 @Injectable()
-export class AppService {
+export class AppService implements OnModuleInit {
   private readonly logger = new Logger(AppService.name);
 
   // Inject AppConfig to use environment/config values
@@ -21,6 +21,27 @@ export class AppService {
         this.logger.error(`[AppService] Error: ${event.error.message}`);
       });
     }
+  }
+
+  onModuleInit() {
+    this.logger.log('--- Environment Variables (Parsed) ---');
+    this.logger.log(`PORT: ${this.config.port}`);
+    this.logger.log(`TEST_CONFIG_NUMBER: ${this.config.testConfigNumber}`);
+    this.logger.log(`TEST_CONFIG_STRING: ${this.config.testConfigString}`);
+    this.logger.log(`TEST_CONFIG_BOOLEAN: ${this.config.testConfigBoolean}`);
+
+    this.logger.log('--- Custom Parser Examples ---');
+    this.logger.log(`SINGLE_QUOTED_VAL: ${this.config.singleQuotedVal}`);
+    this.logger.log(`DOUBLE_QUOTED_VAL: ${this.config.doubleQuotedVal}`);
+    this.logger.log(`APP_NAME: ${this.config.appName}`);
+    this.logger.log(`APP_TITLE: ${this.config.appTitle}`);
+    this.logger.log(`BASE_URL: ${this.config.baseUrl}`);
+    this.logger.log(`DATABASE_URL: ${this.config.databaseUrl}`);
+    this.logger.log(`EMPTY_VAL: "${this.config.emptyVal}"`);
+
+    this.logger.log('--- Multiline Variable (RSA Key) ---');
+    this.logger.log(this.config.privateKey);
+    this.logger.log('------------------------------------');
   }
 
   // Example endpoint value
