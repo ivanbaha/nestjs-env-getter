@@ -432,4 +432,5 @@ Or use the BibTeX entry:
 }
 ```
 
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.18314971.svg)](https://doi.org/10.5281/zenodo.18314971)
 [![ORCID iD](https://img.shields.io/badge/ORCID-0009--0005--7024--7724-A6CE39?logo=orcid&logoColor=white)](https://orcid.org/0009-0005-7024-7724)
