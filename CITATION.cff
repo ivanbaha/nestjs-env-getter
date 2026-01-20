@@ -1,0 +1,18 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+authors:
+  - family-names: "Baha"
+    given-names: "Ivan"
+    orcid: "https://orcid.org/0009-0005-7024-7724"
+title: "nestjs-env-getter"
+version: 1.0.0
+doi: 10.5281/zenodo.18314971
+date-released: 2026-01-20
+url: "https://github.com/ivanbaha/nestjs-env-getter"
+keywords:
+  - nestjs
+  - environment
+  - configuration
+  - typescript
+  - validation
+license: MIT

@@ -412,3 +412,24 @@ When the file watcher detects changes, it updates the **same object instance** i
 ## License
 
 This project is licensed under the MIT License. See the [LICENSE](./LICENSE) file for details.
+
+## Citation
+
+If you use this library in your research or professional projects, please cite it as follows:
+
+**Ivan Baha**. (2026). _nestjs-env-getter_. https://doi.org/10.5281/zenodo.18314971.
+
+Or use the BibTeX entry:
+
+```bibtex
+@software{baha_2026_nestjs_env_getter,
+  author       = {Ivan Baha},
+  title        = {nestjs-env-getter},
+  year         = 2026,
+  publisher    = {Zenodo},
+  doi          = {10.5281/zenodo.18314971},
+  url          = {https://doi.org/10.5281/zenodo.18314971}
+}
+```
+
+[![ORCID iD](https://img.shields.io/badge/ORCID-0009--0005--7024--7724-A6CE39?logo=orcid&logoColor=white)](https://orcid.org/0009-0005-7024-7724)
