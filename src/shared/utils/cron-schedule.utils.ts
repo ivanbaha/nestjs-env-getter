@@ -237,6 +237,8 @@ export class CronSchedule {
   private readonly daysOfMonth: number[];
   private readonly months: number[];
   private readonly daysOfWeek: number[];
+  private readonly dayOfMonthIsWildcard: boolean;
+  private readonly dayOfWeekIsWildcard: boolean;
 
   /**
    * Creates a new CronSchedule instance.
@@ -254,6 +256,8 @@ export class CronSchedule {
       this.daysOfMonth = parseCronField(fields[3] as string, 1, 31);
       this.months = parseCronField(normalizeMonthField(fields[4] as string), 1, 12);
       this.daysOfWeek = parseCronField(normalizeDayOfWeekField(fields[5] as string), 0, 6);
+      this.dayOfMonthIsWildcard = (fields[3] as string) === "*";
+      this.dayOfWeekIsWildcard = (fields[5] as string) === "*";
     } else {
       this.seconds = [0]; // Default to 0 seconds for 5-field cron
       this.minutes = parseCronField(fields[0] as string, 0, 59);
@@ -261,6 +265,8 @@ export class CronSchedule {
       this.daysOfMonth = parseCronField(fields[2] as string, 1, 31);
       this.months = parseCronField(normalizeMonthField(fields[3] as string), 1, 12);
       this.daysOfWeek = parseCronField(normalizeDayOfWeekField(fields[4] as string), 0, 6);
+      this.dayOfMonthIsWildcard = (fields[2] as string) === "*";
+      this.dayOfWeekIsWildcard = (fields[4] as string) === "*";
     }
   }
 
@@ -285,14 +291,33 @@ export class CronSchedule {
     const month = date.getMonth() + 1; // JavaScript months are 0-indexed
     const dayOfWeek = date.getDay();
 
-    return (
-      this.seconds.includes(second) &&
-      this.minutes.includes(minute) &&
-      this.hours.includes(hour) &&
-      this.daysOfMonth.includes(dayOfMonth) &&
-      this.months.includes(month) &&
-      this.daysOfWeek.includes(dayOfWeek)
-    );
+    // Check basic time fields
+    if (!this.seconds.includes(second)) return false;
+    if (!this.minutes.includes(minute)) return false;
+    if (!this.hours.includes(hour)) return false;
+    if (!this.months.includes(month)) return false;
+
+    // Standard cron semantics for day-of-month and day-of-week:
+    // - If both are wildcards (*), any day matches
+    // - If only day-of-month is specified, only day-of-month is checked
+    // - If only day-of-week is specified, only day-of-week is checked
+    // - If both are specified (neither is wildcard), EITHER can match (OR logic)
+    const dayOfMonthMatches = this.daysOfMonth.includes(dayOfMonth);
+    const dayOfWeekMatches = this.daysOfWeek.includes(dayOfWeek);
+
+    if (this.dayOfMonthIsWildcard && this.dayOfWeekIsWildcard) {
+      // Both are wildcards - any day matches
+      return true;
+    } else if (this.dayOfMonthIsWildcard) {
+      // Only day-of-week is specified
+      return dayOfWeekMatches;
+    } else if (this.dayOfWeekIsWildcard) {
+      // Only day-of-month is specified
+      return dayOfMonthMatches;
+    } else {
+      // Both are specified - use OR logic (standard cron behavior)
+      return dayOfMonthMatches || dayOfWeekMatches;
+    }
   }
 
   /**
@@ -325,10 +350,28 @@ export class CronSchedule {
         continue;
       }
 
-      // Check day of month and day of week
+      // Check day of month and day of week using standard cron semantics
       const dayOfMonth = current.getDate();
       const dayOfWeek = current.getDay();
-      if (!this.daysOfMonth.includes(dayOfMonth) || !this.daysOfWeek.includes(dayOfWeek)) {
+      const dayOfMonthMatches = this.daysOfMonth.includes(dayOfMonth);
+      const dayOfWeekMatches = this.daysOfWeek.includes(dayOfWeek);
+
+      let dayMatches: boolean;
+      if (this.dayOfMonthIsWildcard && this.dayOfWeekIsWildcard) {
+        // Both are wildcards - any day matches
+        dayMatches = true;
+      } else if (this.dayOfMonthIsWildcard) {
+        // Only day-of-week is specified
+        dayMatches = dayOfWeekMatches;
+      } else if (this.dayOfWeekIsWildcard) {
+        // Only day-of-month is specified
+        dayMatches = dayOfMonthMatches;
+      } else {
+        // Both are specified - use OR logic (standard cron behavior)
+        dayMatches = dayOfMonthMatches || dayOfWeekMatches;
+      }
+
+      if (!dayMatches) {
         // Move to next day
         current.setDate(current.getDate() + 1);
         current.setHours(0);

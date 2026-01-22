@@ -205,6 +205,45 @@ describe("CronSchedule", () => {
       expect(schedule.isMatching(new Date("2024-06-15T10:30:00"))).toBe(true);
       expect(schedule.isMatching(new Date("2024-06-15T10:15:00"))).toBe(false);
     });
+
+    test("uses OR logic when both day-of-month and day-of-week are specified", () => {
+      // "0 0 15 * 1" means: run at midnight on the 15th OR any Monday
+      const schedule = new CronSchedule("0 0 15 * 1");
+
+      // June 15, 2024 is a Saturday (day 15, not Monday) - should match (day-of-month matches)
+      const day15Saturday = new Date("2024-06-15T00:00:00");
+      expect(schedule.isMatching(day15Saturday)).toBe(true);
+
+      // June 17, 2024 is a Monday (day 17, not 15) - should match (day-of-week matches)
+      const day17Monday = new Date("2024-06-17T00:00:00");
+      expect(schedule.isMatching(day17Monday)).toBe(true);
+
+      // June 16, 2024 is a Sunday (day 16, not 15, not Monday) - should not match
+      const day16Sunday = new Date("2024-06-16T00:00:00");
+      expect(schedule.isMatching(day16Sunday)).toBe(false);
+    });
+
+    test("uses only day-of-month when day-of-week is wildcard", () => {
+      // "0 0 15 * *" means: run at midnight on the 15th of every month
+      const schedule = new CronSchedule("0 0 15 * *");
+
+      // June 15, 2024 (Saturday) - should match
+      expect(schedule.isMatching(new Date("2024-06-15T00:00:00"))).toBe(true);
+
+      // June 17, 2024 (Monday) - should not match (not the 15th)
+      expect(schedule.isMatching(new Date("2024-06-17T00:00:00"))).toBe(false);
+    });
+
+    test("uses only day-of-week when day-of-month is wildcard", () => {
+      // "0 0 * * 1" means: run at midnight every Monday
+      const schedule = new CronSchedule("0 0 * * 1");
+
+      // June 17, 2024 (Monday) - should match
+      expect(schedule.isMatching(new Date("2024-06-17T00:00:00"))).toBe(true);
+
+      // June 15, 2024 (Saturday) - should not match
+      expect(schedule.isMatching(new Date("2024-06-15T00:00:00"))).toBe(false);
+    });
   });
 
   describe("getNextTime", () => {
