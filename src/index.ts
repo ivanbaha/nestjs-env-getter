@@ -5,3 +5,4 @@ export { AppConfigModule } from "./app-config/app-config.module";
 
 export * from "./shared/types";
 export * from "./env-getter/types";
+export { CronSchedule } from "./shared/utils/cron-schedule.utils";

@@ -1,5 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment */
-/* eslint-disable @typescript-eslint/no-unsafe-member-access */
 import { Injectable } from '@nestjs/common';
 // Import the EnvGetterService from the nestjs-env-getter library
 import { EnvGetterService, WithConfigEvents } from 'nestjs-env-getter';
