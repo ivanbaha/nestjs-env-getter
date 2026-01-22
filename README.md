@@ -218,6 +218,57 @@ Parses a string like `'10s'`, `'5m'`, `'2h'`, `'1d'` into a numeric value.
   );
   ```
 
+### Cron Expression
+
+Parses cron expressions and returns a `CronSchedule` object with utility methods. Supports both 5-field (minute, hour, day-of-month, month, day-of-week) and 6-field (second, minute, hour, day-of-month, month, day-of-week) formats.
+
+- **`getRequiredCron(name: string): CronSchedule`**
+
+  ```typescript
+  // Throws an error if BACKUP_SCHEDULE is not set or invalid
+  const backupSchedule = this.envGetter.getRequiredCron("BACKUP_SCHEDULE");
+  // ENV: '0 2 * * *' (runs at 2:00 AM daily)
+
+  // Get the next scheduled execution time
+  console.log(backupSchedule.getNextTime()); // Date object
+
+  // Check if current time matches the schedule
+  console.log(backupSchedule.isMatching(new Date())); // boolean
+
+  // Get the original cron expression
+  console.log(backupSchedule.toString()); // '0 2 * * *'
+  ```
+
+- **`getOptionalCron(name: string): CronSchedule | undefined`**
+
+  ```typescript
+  // Returns undefined if CLEANUP_SCHEDULE is not set
+  const cleanupSchedule = this.envGetter.getOptionalCron("CLEANUP_SCHEDULE");
+
+  if (cleanupSchedule) {
+    console.log("Next cleanup at:", cleanupSchedule.getNextTime());
+  }
+  ```
+
+**`CronSchedule` Methods:**
+
+- `toString(): string` - Returns the original cron expression.
+- `isMatching(date: Date): boolean` - Checks if the given date matches the schedule.
+- `getNextTime(from?: Date): Date | null` - Calculates the next execution time after the given date (defaults to current time).
+
+**Supported Cron Formats:**
+
+| Field        | 5-field index | 6-field index | Allowed Values                             |
+| ------------ | ------------- | ------------- | ------------------------------------------ |
+| Second       | -             | 0             | 0-59                                       |
+| Minute       | 0             | 1             | 0-59                                       |
+| Hour         | 1             | 2             | 0-23                                       |
+| Day of Month | 2             | 3             | 1-31                                       |
+| Month        | 3             | 4             | 1-12 or JAN-DEC                            |
+| Day of Week  | 4             | 5             | 0-7 (0 and 7 = Sunday) or SUN-SAT          |
+
+**Special Characters:** `*` (any), `,` (list), `-` (range), `/` (step)
+
 ### Object (from JSON string)
 
 - **`getRequiredObject<T>(name: string, cls?: ClassConstructor<T>): T`**

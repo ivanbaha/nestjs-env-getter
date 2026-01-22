@@ -5,7 +5,14 @@ import { join, isAbsolute } from "path";
 
 import { Injectable, OnModuleDestroy } from "@nestjs/common";
 
-import { type ClassConstructor, isTimePeriod, parseTimePeriod, TimeMarker } from "../shared";
+import {
+  type ClassConstructor,
+  isTimePeriod,
+  parseTimePeriod,
+  TimeMarker,
+  isValidCronExpression,
+  CronSchedule,
+} from "../shared";
 import {
   type ArrayValidatorType,
   type ConfigErrorEvent,
@@ -283,6 +290,74 @@ export class EnvGetterService implements OnModuleDestroy {
     if (envVal && !isTimePeriod(envVal)) this.stopProcess(`Variable ${baseErrorMessage}`);
 
     return parseTimePeriod(envVal ?? defaultValue, resultIn);
+  }
+
+  /**
+   * Retrieves and parses a required environment variable as a cron schedule.
+   * - Ensures the environment variable is set.
+   * - Validates that the value is a valid cron expression (5 or 6 fields).
+   * - Returns a CronSchedule instance with utility methods.
+   * - Terminates the process if the variable is missing or invalid.
+   * @param envName - The name of the required environment variable.
+   * @returns A CronSchedule instance wrapping the validated cron expression.
+   * @throws Terminates the process if the variable is missing or not a valid cron expression.
+   * @example
+   * // 5-field format: minute hour day-of-month month day-of-week
+   * const schedule = this.envGetter.getRequiredCron('BACKUP_SCHEDULE');
+   * // ENV: '0 2 * * *' (runs at 2:00 AM daily)
+   * console.log(schedule.getNextTime()); // Next execution time
+   * console.log(schedule.isMatching(new Date())); // Check if current time matches
+   * console.log(schedule.toString()); // '0 2 * * *'
+   *
+   * // 6-field format: second minute hour day-of-month month day-of-week
+   * // ENV: '0 30 9 * * MON-FRI' (runs at 9:30:00 AM on weekdays)
+   */
+  getRequiredCron(envName: string): CronSchedule {
+    const envVal = this.getRequiredEnv(envName);
+
+    if (!isValidCronExpression(envVal)) {
+      return this.stopProcess(
+        `Variable '${envName}' is not a valid cron expression. Expected 5 or 6 fields: [second] minute hour day-of-month month day-of-week`,
+      );
+    }
+
+    return new CronSchedule(envVal);
+  }
+
+  /**
+   * Retrieves and parses an optional environment variable as a cron schedule.
+   * - If the variable is not set, returns undefined.
+   * - If the variable is set, validates that it is a valid cron expression.
+   * - Terminates the process if the variable is set but contains an invalid cron expression.
+   * @param envName - The name of the environment variable.
+   * @returns A CronSchedule instance if the variable is set and valid, undefined otherwise.
+   * @throws Terminates the process if the variable is set but not a valid cron expression.
+   * @example
+   * // Optional cron without default - returns undefined if not set
+   * const schedule = this.envGetter.getOptionalCron('CLEANUP_SCHEDULE');
+   * if (schedule) {
+   *   console.log('Next cleanup at:', schedule.getNextTime());
+   * }
+   *
+   * // 5-field format: minute hour day-of-month month day-of-week
+   * // 6-field format: second minute hour day-of-month month day-of-week
+   */
+  getOptionalCron(envName: string): CronSchedule | undefined {
+    const envVal = process.env[envName];
+
+    // If the variable is not set, return undefined
+    if (envVal === undefined) {
+      return undefined;
+    }
+
+    // If the variable is set but invalid, terminate the process
+    if (!isValidCronExpression(envVal)) {
+      return this.stopProcess(
+        `Variable '${envName}' is not a valid cron expression. Expected 5 or 6 fields: [second] minute hour day-of-month month day-of-week`,
+      );
+    }
+
+    return new CronSchedule(envVal);
   }
 
   /**
