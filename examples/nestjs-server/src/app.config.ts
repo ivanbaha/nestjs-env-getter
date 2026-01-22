@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 // Import the EnvGetterService from the nestjs-env-getter library
-import { EnvGetterService, WithConfigEvents } from 'nestjs-env-getter';
+import { EnvGetterService, WithConfigEvents, CronSchedule } from 'nestjs-env-getter';
 
 @Injectable()
 export class AppConfig {
@@ -26,6 +26,10 @@ export class AppConfig {
   readonly allowedDomains: string[];
   readonly complexConfig: ComplexConfig;
   readonly simpleConfig: SimpleConfig;
+
+  // Cron schedule examples
+  readonly backupSchedule: CronSchedule;
+  readonly cleanupSchedule?: CronSchedule;
 
   constructor(protected readonly envGetter: EnvGetterService) {
     // Load required numeric environment variable
@@ -79,6 +83,17 @@ export class AppConfig {
 
     // Load simple multiline object (single-quoted, no escapes)
     this.simpleConfig = this.envGetter.getRequiredObject('SIMPLE_CONFIG', SimpleConfig);
+
+    // Load required cron schedule for backups (runs at 2:00 AM daily)
+    this.backupSchedule = this.envGetter.getRequiredCron('BACKUP_SCHEDULE');
+    // Log next execution time on startup
+    console.log('[AppConfig] Next backup at:', this.backupSchedule.getNextTime());
+
+    // Load optional cron schedule for cleanup (undefined if not set)
+    this.cleanupSchedule = this.envGetter.getOptionalCron('CLEANUP_SCHEDULE');
+    if (this.cleanupSchedule) {
+      console.log('[AppConfig] Next cleanup at:', this.cleanupSchedule.getNextTime());
+    }
   }
 }
 
