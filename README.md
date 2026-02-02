@@ -258,14 +258,14 @@ Parses cron expressions and returns a `CronSchedule` object with utility methods
 
 **Supported Cron Formats:**
 
-| Field        | 5-field index | 6-field index | Allowed Values                             |
-| ------------ | ------------- | ------------- | ------------------------------------------ |
-| Second       | -             | 0             | 0-59                                       |
-| Minute       | 0             | 1             | 0-59                                       |
-| Hour         | 1             | 2             | 0-23                                       |
-| Day of Month | 2             | 3             | 1-31                                       |
-| Month        | 3             | 4             | 1-12 or JAN-DEC                            |
-| Day of Week  | 4             | 5             | 0-7 (0 and 7 = Sunday) or SUN-SAT          |
+| Field        | 5-field index | 6-field index | Allowed Values                    |
+| ------------ | ------------- | ------------- | --------------------------------- |
+| Second       | -             | 0             | 0-59                              |
+| Minute       | 0             | 1             | 0-59                              |
+| Hour         | 1             | 2             | 0-23                              |
+| Day of Month | 2             | 3             | 1-31                              |
+| Month        | 3             | 4             | 1-12 or JAN-DEC                   |
+| Day of Week  | 4             | 5             | 0-7 (0 and 7 = Sunday) or SUN-SAT |
 
 **Special Characters:** `*` (any), `,` (list), `-` (range), `/` (step)
 
@@ -470,5 +470,5 @@ If you use this library in your research or professional projects, please cite i
 
 **Ivan Baha**. (2026). _nestjs-env-getter_.
 
-[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.18314971.svg)](https://doi.org/10.5281/zenodo.18314971)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.18314971.svg)](https://doi.org/10.5281/zenodo.18457368)
 [![ORCID iD](https://img.shields.io/badge/ORCID-0009--0005--7024--7724-A6CE39?logo=orcid&logoColor=white)](https://orcid.org/0009-0005-7024-7724)
