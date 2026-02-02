@@ -112,6 +112,47 @@ describe("isValidCronExpression", () => {
     test("returns false for invalid range order", () => {
       expect(isValidCronExpression("30-10 * * * *")).toBe(false);
     });
+
+    test("returns false for impossible day/month combinations", () => {
+      // February 31st - impossible
+      expect(isValidCronExpression("0 0 31 2 *")).toBe(false);
+      // February 30th - impossible
+      expect(isValidCronExpression("0 0 30 2 *")).toBe(false);
+      // February 30th and 31st - both impossible
+      expect(isValidCronExpression("0 0 30,31 2 *")).toBe(false);
+      // April 31st - impossible (April has 30 days)
+      expect(isValidCronExpression("0 0 31 4 *")).toBe(false);
+      // June 31st - impossible
+      expect(isValidCronExpression("0 0 31 6 *")).toBe(false);
+      // September 31st - impossible
+      expect(isValidCronExpression("0 0 31 9 *")).toBe(false);
+      // November 31st - impossible
+      expect(isValidCronExpression("0 0 31 11 *")).toBe(false);
+      // Day 31 on all 30-day months - impossible
+      expect(isValidCronExpression("0 0 31 4,6,9,11 *")).toBe(false);
+      // 6-field format: February 31st - impossible
+      expect(isValidCronExpression("0 0 0 31 2 *")).toBe(false);
+    });
+
+    test("returns true for possible day/month combinations", () => {
+      // February 29th - possible (leap year)
+      expect(isValidCronExpression("0 0 29 2 *")).toBe(true);
+      // Day 31 on January - possible
+      expect(isValidCronExpression("0 0 31 1 *")).toBe(true);
+      // Day 31 on mixed months (Jan and Feb) - possible because Jan 31st exists
+      expect(isValidCronExpression("0 0 31 1,2 *")).toBe(true);
+      // Day 30 on April - possible
+      expect(isValidCronExpression("0 0 30 4 *")).toBe(true);
+      // Day 31 with wildcard month - possible
+      expect(isValidCronExpression("0 0 31 * *")).toBe(true);
+    });
+
+    test("returns true when day-of-week is specified (OR logic applies)", () => {
+      // February 31st with Monday - valid because Mondays in February will match
+      expect(isValidCronExpression("0 0 31 2 1")).toBe(true);
+      // April 31st with Friday - valid because Fridays in April will match
+      expect(isValidCronExpression("0 0 31 4 5")).toBe(true);
+    });
   });
 });
 
@@ -336,6 +377,152 @@ describe("CronSchedule", () => {
 
       expect(next).not.toBeNull();
       expect(next?.getSeconds()).toBe(46);
+    });
+  });
+
+  describe("getPrevTime", () => {
+    test("finds previous time for hourly cron at minute 0", () => {
+      const schedule = new CronSchedule("0 * * * *");
+      const from = new Date("2024-06-15T10:30:00");
+      const prev = schedule.getPrevTime(from);
+
+      expect(prev).not.toBeNull();
+      expect(prev?.getMinutes()).toBe(0);
+      expect(prev?.getHours()).toBe(10);
+    });
+
+    test("finds previous time for daily cron at 2:00 AM", () => {
+      const schedule = new CronSchedule("0 2 * * *");
+      const from = new Date("2024-06-15T01:00:00");
+      const prev = schedule.getPrevTime(from);
+
+      expect(prev).not.toBeNull();
+      expect(prev?.getMinutes()).toBe(0);
+      expect(prev?.getHours()).toBe(2);
+      expect(prev?.getDate()).toBe(14);
+    });
+
+    test("finds previous time for monthly cron on the 1st", () => {
+      const schedule = new CronSchedule("0 0 1 * *");
+      const from = new Date("2024-06-15T00:00:00");
+      const prev = schedule.getPrevTime(from);
+
+      expect(prev).not.toBeNull();
+      expect(prev?.getDate()).toBe(1);
+      expect(prev?.getMonth()).toBe(5); // June (0-indexed)
+    });
+
+    test("finds previous time for yearly cron on Jan 1st", () => {
+      const schedule = new CronSchedule("0 0 1 1 *");
+      const from = new Date("2024-06-15T00:00:00");
+      const prev = schedule.getPrevTime(from);
+
+      expect(prev).not.toBeNull();
+      expect(prev?.getDate()).toBe(1);
+      expect(prev?.getMonth()).toBe(0); // January
+      expect(prev?.getFullYear()).toBe(2024);
+    });
+
+    test("finds previous time for weekday cron (Mon-Fri)", () => {
+      const schedule = new CronSchedule("0 9 * * 1-5");
+      // Sunday June 16, 2024
+      const from = new Date("2024-06-16T08:00:00");
+      const prev = schedule.getPrevTime(from);
+
+      expect(prev).not.toBeNull();
+      // Should be Friday June 14, 2024
+      expect(prev?.getDay()).toBeGreaterThanOrEqual(1);
+      expect(prev?.getDay()).toBeLessThanOrEqual(5);
+    });
+
+    test("finds previous time with 6-field format (with seconds)", () => {
+      const schedule = new CronSchedule("30 0 * * * *");
+      const from = new Date("2024-06-15T10:00:45");
+      const prev = schedule.getPrevTime(from);
+
+      expect(prev).not.toBeNull();
+      expect(prev?.getSeconds()).toBe(30);
+    });
+
+    test("returns null when no match within iteration limit", () => {
+      // Create a schedule that will never match (Feb 31st)
+      const schedule = new CronSchedule("0 0 31 2 *");
+      const from = new Date("2024-12-31T23:59:59");
+      const prev = schedule.getPrevTime(from, 100); // Very small limit
+
+      expect(prev).toBeNull();
+    });
+
+    test("starts from previous minute for 5-field cron", () => {
+      const schedule = new CronSchedule("* * * * *");
+      const from = new Date("2024-06-15T10:30:45");
+      const prev = schedule.getPrevTime(from);
+
+      expect(prev).not.toBeNull();
+      expect(prev?.getSeconds()).toBe(0);
+      expect(prev?.getMinutes()).toBe(29);
+    });
+
+    test("starts from previous second for 6-field cron", () => {
+      const schedule = new CronSchedule("* * * * * *");
+      const from = new Date("2024-06-15T10:30:45");
+      const prev = schedule.getPrevTime(from);
+
+      expect(prev).not.toBeNull();
+      expect(prev?.getSeconds()).toBe(44);
+    });
+
+    test("finds previous time crossing month boundary", () => {
+      const schedule = new CronSchedule("0 0 15 * *");
+      const from = new Date("2024-07-01T00:00:00");
+      const prev = schedule.getPrevTime(from);
+
+      expect(prev).not.toBeNull();
+      expect(prev?.getDate()).toBe(15);
+      expect(prev?.getMonth()).toBe(5); // June (0-indexed)
+    });
+
+    test("finds previous time crossing year boundary", () => {
+      const schedule = new CronSchedule("0 0 25 12 *");
+      const from = new Date("2024-01-15T00:00:00");
+      const prev = schedule.getPrevTime(from);
+
+      expect(prev).not.toBeNull();
+      expect(prev?.getDate()).toBe(25);
+      expect(prev?.getMonth()).toBe(11); // December
+      expect(prev?.getFullYear()).toBe(2023);
+    });
+
+    test("uses OR logic when both day-of-month and day-of-week are specified", () => {
+      // "0 0 15 * 1" means: run at midnight on the 15th OR any Monday
+      const schedule = new CronSchedule("0 0 15 * 1");
+
+      // From June 18, 2024 (Tuesday), looking back
+      const from = new Date("2024-06-18T12:00:00");
+      const prev = schedule.getPrevTime(from);
+
+      expect(prev).not.toBeNull();
+      // Should find June 17 (Monday) at midnight
+      expect(prev?.getDate()).toBe(17);
+      expect(prev?.getDay()).toBe(1); // Monday
+    });
+
+    test("finds previous time with step values", () => {
+      const schedule = new CronSchedule("*/15 * * * *");
+      const from = new Date("2024-06-15T10:50:00");
+      const prev = schedule.getPrevTime(from);
+
+      expect(prev).not.toBeNull();
+      expect(prev?.getMinutes()).toBe(45);
+    });
+
+    test("finds previous time with list values", () => {
+      const schedule = new CronSchedule("0,30 * * * *");
+      const from = new Date("2024-06-15T10:15:00");
+      const prev = schedule.getPrevTime(from);
+
+      expect(prev).not.toBeNull();
+      expect(prev?.getMinutes()).toBe(0);
     });
   });
 });

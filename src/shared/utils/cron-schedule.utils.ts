@@ -117,9 +117,112 @@ function normalizeDayOfWeekField(field: string): string {
 }
 
 /**
+ * Maximum days in each month (index 0 = unused, 1-12 = Jan-Dec).
+ * February uses 29 to account for leap years.
+ */
+const maxDaysInMonth: Record<number, number> = {
+  1: 31, // January
+  2: 29, // February (leap year max)
+  3: 31, // March
+  4: 30, // April
+  5: 31, // May
+  6: 30, // June
+  7: 31, // July
+  8: 31, // August
+  9: 30, // September
+  10: 31, // October
+  11: 30, // November
+  12: 31, // December
+};
+
+/**
+ * Parses a cron field into an array of matching values for validation purposes.
+ * This is a simplified version used only during validation.
+ * @param field - The cron field string.
+ * @param min - The minimum allowed value.
+ * @param max - The maximum allowed value.
+ * @returns An array of matching values.
+ */
+function parseFieldForValidation(field: string, min: number, max: number): number[] {
+  // Handle wildcard
+  if (field === "*") {
+    const result: number[] = [];
+    for (let i = min; i <= max; i++) {
+      result.push(i);
+    }
+    return result;
+  }
+
+  // Handle step values (e.g., */5, 1-10/2)
+  const stepMatch = /^(.+)\/(\d+)$/.exec(field);
+  if (stepMatch) {
+    const base = stepMatch[1] as string;
+    const step = stepMatch[2] as string;
+    const stepNum = parseInt(step, 10);
+    const baseValues = parseFieldForValidation(base, min, max);
+    const result: number[] = [];
+    for (let i = 0; i < baseValues.length; i += stepNum) {
+      result.push(baseValues[i] as number);
+    }
+    return result;
+  }
+
+  // Handle ranges (e.g., 1-5)
+  const rangeMatch = /^(\d+)-(\d+)$/.exec(field);
+  if (rangeMatch) {
+    const start = rangeMatch[1] as string;
+    const end = rangeMatch[2] as string;
+    const startNum = parseInt(start, 10);
+    const endNum = parseInt(end, 10);
+    const result: number[] = [];
+    for (let i = startNum; i <= endNum; i++) {
+      result.push(i);
+    }
+    return result;
+  }
+
+  // Handle lists (e.g., 1,3,5)
+  if (field.includes(",")) {
+    const parts = field.split(",");
+    const result: number[] = [];
+    for (const part of parts) {
+      result.push(...parseFieldForValidation(part.trim(), min, max));
+    }
+    return [...new Set(result)].sort((a, b) => a - b);
+  }
+
+  // Handle single numeric values
+  const num = parseInt(field, 10);
+  return [num];
+}
+
+/**
+ * Checks if the day-of-month and month combination can ever match.
+ * For example, Feb 31st is impossible since February never has 31 days.
+ * @param days - Array of days of month.
+ * @param months - Array of months.
+ * @returns True if at least one day/month combination is possible.
+ */
+function isDayMonthCombinationPossible(days: number[], months: number[]): boolean {
+  // For each day, check if at least one month can have that day
+  for (const day of days) {
+    for (const month of months) {
+      const maxDays = maxDaysInMonth[month];
+      if (maxDays !== undefined && day <= maxDays) {
+        // Found at least one valid combination
+        return true;
+      }
+    }
+  }
+  // No valid day/month combination found
+  return false;
+}
+
+/**
  * Checks if the given value is a valid cron expression.
  * Supports both 5-field (minute hour day-of-month month day-of-week)
  * and 6-field (second minute hour day-of-month month day-of-week) formats.
+ * Also validates semantic correctness (e.g., rejects Feb 31st).
  * @param value - The cron expression string to validate.
  * @returns True if the value is a valid cron expression, false otherwise.
  */
@@ -156,6 +259,26 @@ export function isValidCronExpression(value: string): boolean {
       field = config.normalize(field);
     }
     if (!isValidCronField(field, config.min, config.max)) {
+      return false;
+    }
+  }
+
+  // Semantic validation: check if day-of-month/month combination is possible
+  // Only check when day-of-week is wildcard (otherwise OR logic applies and day-of-week can still match)
+  const dayOfMonthIdx = isSixField ? 3 : 2;
+  const monthIdx = isSixField ? 4 : 3;
+  const dayOfWeekIdx = isSixField ? 5 : 4;
+
+  const dayOfMonthField = fields[dayOfMonthIdx] as string;
+  const monthField = normalizeMonthField(fields[monthIdx] as string);
+  const dayOfWeekField = fields[dayOfWeekIdx] as string;
+
+  // If day-of-week is wildcard, day-of-month must be achievable
+  if (dayOfWeekField === "*" && dayOfMonthField !== "*") {
+    const days = parseFieldForValidation(dayOfMonthField, 1, 31);
+    const months = parseFieldForValidation(monthField, 1, 12);
+
+    if (!isDayMonthCombinationPossible(days, months)) {
       return false;
     }
   }
@@ -401,6 +524,97 @@ export class CronSchedule {
       if (this.isSixField && !this.seconds.includes(current.getSeconds())) {
         // Move to next second
         current.setSeconds(current.getSeconds() + 1);
+        continue;
+      }
+
+      // Found a match
+      return current;
+    }
+
+    // No match found within iteration limit
+    return null;
+  }
+
+  /**
+   * Calculates the previous execution time before the given date.
+   * @param from - The starting date (defaults to current time).
+   * @param maxIterations - Maximum number of iterations to search (defaults to 366 days * 24 hours * 60 minutes = 527040).
+   * @returns The previous execution date, or null if no match found within iteration limit.
+   */
+  getPrevTime(from: Date = new Date(), maxIterations: number = 527040): Date | null {
+    // Start from the previous second or minute depending on format
+    const current = new Date(from.getTime());
+    if (this.isSixField) {
+      current.setSeconds(current.getSeconds() - 1);
+      current.setMilliseconds(0);
+    } else {
+      current.setMinutes(current.getMinutes() - 1);
+      current.setSeconds(0);
+      current.setMilliseconds(0);
+    }
+
+    for (let i = 0; i < maxIterations; i++) {
+      // Check month
+      if (!this.months.includes(current.getMonth() + 1)) {
+        // Move to previous month's last day
+        current.setDate(0); // This sets to last day of previous month
+        current.setHours(23);
+        current.setMinutes(59);
+        current.setSeconds(this.isSixField ? 59 : 0);
+        continue;
+      }
+
+      // Check day of month and day of week using standard cron semantics
+      const dayOfMonth = current.getDate();
+      const dayOfWeek = current.getDay();
+      const dayOfMonthMatches = this.daysOfMonth.includes(dayOfMonth);
+      const dayOfWeekMatches = this.daysOfWeek.includes(dayOfWeek);
+
+      let dayMatches: boolean;
+      if (this.dayOfMonthIsWildcard && this.dayOfWeekIsWildcard) {
+        // Both are wildcards - any day matches
+        dayMatches = true;
+      } else if (this.dayOfMonthIsWildcard) {
+        // Only day-of-week is specified
+        dayMatches = dayOfWeekMatches;
+      } else if (this.dayOfWeekIsWildcard) {
+        // Only day-of-month is specified
+        dayMatches = dayOfMonthMatches;
+      } else {
+        // Both are specified - use OR logic (standard cron behavior)
+        dayMatches = dayOfMonthMatches || dayOfWeekMatches;
+      }
+
+      if (!dayMatches) {
+        // Move to previous day
+        current.setDate(current.getDate() - 1);
+        current.setHours(23);
+        current.setMinutes(59);
+        current.setSeconds(this.isSixField ? 59 : 0);
+        continue;
+      }
+
+      // Check hour
+      if (!this.hours.includes(current.getHours())) {
+        // Move to previous hour
+        current.setHours(current.getHours() - 1);
+        current.setMinutes(59);
+        current.setSeconds(this.isSixField ? 59 : 0);
+        continue;
+      }
+
+      // Check minute
+      if (!this.minutes.includes(current.getMinutes())) {
+        // Move to previous minute
+        current.setMinutes(current.getMinutes() - 1);
+        current.setSeconds(this.isSixField ? 59 : 0);
+        continue;
+      }
+
+      // Check second (for 6-field cron)
+      if (this.isSixField && !this.seconds.includes(current.getSeconds())) {
+        // Move to previous second
+        current.setSeconds(current.getSeconds() - 1);
         continue;
       }
 

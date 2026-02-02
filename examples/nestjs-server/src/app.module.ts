@@ -1,9 +1,11 @@
 import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
+import { ScheduleModule } from '@nestjs/schedule';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { AppConfig } from './app.config';
 import { UsersTestModule } from './users-test/users-test.module';
+import { TasksModule } from './tasks/tasks.module';
 // Import the configuration module from the local nestjs-env-getter source
 import { AppConfigModule } from 'nestjs-env-getter';
 import { MongoConnectionService } from './mongo-connection.service';
@@ -24,10 +26,11 @@ import { MongoConnectionService } from './mongo-connection.service';
       inject: [AppConfig],
     }),
 
+    ScheduleModule.forRoot(),
     UsersTestModule,
+    TasksModule,
   ],
   controllers: [AppController],
   providers: [AppService, MongoConnectionService],
 })
-// Main application module, wires up configuration and MongoDB connection
 export class AppModule {}
