@@ -470,5 +470,5 @@ If you use this library in your research or professional projects, please cite i
 
 **Ivan Baha**. (2026). _nestjs-env-getter_.
 
-[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.18314971.svg)](https://doi.org/10.5281/zenodo.18457368)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.18457368.svg)](https://doi.org/10.5281/zenodo.18457368)
 [![ORCID iD](https://img.shields.io/badge/ORCID-0009--0005--7024--7724-A6CE39?logo=orcid&logoColor=white)](https://orcid.org/0009-0005-7024-7724)
