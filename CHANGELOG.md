@@ -7,6 +7,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] - 2026-02-02
+
+### Added
+
+- **Cron Expression Support**: Added `getRequiredCron` and `getOptionalCron` to parse cron environment variables into a `CronSchedule`.
+  - Supports both 5-field and 6-field cron formats.
+  - Provides helpers like `isMatching`, `getNextTime`, and `getPrevTime`.
+- **Cron Validation Utilities**: Added and exported `isValidCronExpression` for validating cron strings (including basic semantic checks like rejecting impossible day/month combinations).
+- **Cron Semantics**: Day-of-month and day-of-week follow standard cron behavior when both are specified (OR logic rather than requiring both to match).
+
+### Changed
+
+- **Documentation & Examples**: Expanded README cron documentation and updated the `nestjs-server` example to demonstrate cron schedules.
+
 ## [1.0.0] - 2026-01-17
 
 ### Added

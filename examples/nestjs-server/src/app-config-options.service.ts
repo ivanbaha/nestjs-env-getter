@@ -35,7 +35,7 @@ export class AppConfigOptionsService {
   }
 
   /**
-   * Get configuration options that can be used by AppConfig
+   * Get configuration options that can be used by AppConfig.
    */
   getConfigOptions() {
     return {

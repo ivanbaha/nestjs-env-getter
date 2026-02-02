@@ -1,8 +1,6 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment */
-/* eslint-disable @typescript-eslint/no-unsafe-member-access */
 import { Injectable } from '@nestjs/common';
 // Import the EnvGetterService from the nestjs-env-getter library
-import { EnvGetterService, WithConfigEvents } from 'nestjs-env-getter';
+import { EnvGetterService, WithConfigEvents, CronSchedule } from 'nestjs-env-getter';
 
 @Injectable()
 export class AppConfig {
@@ -28,6 +26,10 @@ export class AppConfig {
   readonly allowedDomains: string[];
   readonly complexConfig: ComplexConfig;
   readonly simpleConfig: SimpleConfig;
+
+  // Cron schedule examples
+  readonly backupSchedule: CronSchedule;
+  readonly cleanupSchedule?: CronSchedule;
 
   constructor(protected readonly envGetter: EnvGetterService) {
     // Load required numeric environment variable
@@ -81,6 +83,12 @@ export class AppConfig {
 
     // Load simple multiline object (single-quoted, no escapes)
     this.simpleConfig = this.envGetter.getRequiredObject('SIMPLE_CONFIG', SimpleConfig);
+
+    // Load required cron schedule for backups (runs at 2:00 AM daily)
+    this.backupSchedule = this.envGetter.getRequiredCron('BACKUP_SCHEDULE');
+
+    // Load optional cron schedule for cleanup (undefined if not set)
+    this.cleanupSchedule = this.envGetter.getOptionalCron('CLEANUP_SCHEDULE');
   }
 }
 
@@ -90,7 +98,7 @@ class MongoCredentials {
   connectionString: string;
 
   // Used by EnvGetterService to validate the loaded config
-  constructor(data: any) {
+  constructor(data: Record<string, unknown>) {
     if (!data.connectionString || typeof data.connectionString !== 'string') {
       throw new Error('connectionString is required and must be a string');
     }
@@ -102,7 +110,7 @@ class TestConfig {
   testConfigStringFromFile: string;
 
   // Used by EnvGetterService to validate the loaded config
-  constructor(data: any) {
+  constructor(data: Record<string, unknown>) {
     if (!data.testConfigStringFromFile || typeof data.testConfigStringFromFile !== 'string') {
       throw new Error('testConfigStringFromFile is required and must be a string');
     }
@@ -119,22 +127,19 @@ class ComplexConfig {
     interval: number;
   };
 
-  constructor(data: any) {
+  constructor(data: Record<string, unknown>) {
     if (typeof data.featureEnabled !== 'boolean') throw new Error('featureEnabled is required (boolean)');
     if (typeof data.maxUsers !== 'number') throw new Error('maxUsers is required (number)');
     if (typeof data.apiEndpoint !== 'string') throw new Error('apiEndpoint is required (string)');
-    if (
-      !data.retryConfig ||
-      typeof data.retryConfig.count !== 'number' ||
-      typeof data.retryConfig.interval !== 'number'
-    ) {
+    const retryConfig = data.retryConfig as Record<string, unknown> | undefined;
+    if (!retryConfig || typeof retryConfig.count !== 'number' || typeof retryConfig.interval !== 'number') {
       throw new Error('retryConfig is required with count and interval as numbers');
     }
 
     this.featureEnabled = data.featureEnabled;
     this.maxUsers = data.maxUsers;
     this.apiEndpoint = data.apiEndpoint;
-    this.retryConfig = data.retryConfig;
+    this.retryConfig = { count: retryConfig.count, interval: retryConfig.interval };
   }
 }
 
@@ -143,7 +148,7 @@ class SimpleConfig {
   version: number;
   enabled: boolean;
 
-  constructor(data: any) {
+  constructor(data: Record<string, unknown>) {
     if (typeof data.name !== 'string') throw new Error('name is required (string)');
     if (typeof data.version !== 'number') throw new Error('version is required (number)');
     if (typeof data.enabled !== 'boolean') throw new Error('enabled is required (boolean)');

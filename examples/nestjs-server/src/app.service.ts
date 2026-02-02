@@ -45,6 +45,15 @@ export class AppService implements OnModuleInit {
     this.logger.log('--- Multiline Variable (RSA Key) ---');
     this.logger.log(this.config.privateKey);
     this.logger.log('------------------------------------');
+
+    this.logger.log('--- Cron Schedules ---');
+    this.logger.log(`Previous backup at: ${this.config.backupSchedule.getPrevTime()?.toISOString() || 'N/A'}`);
+    this.logger.log(`Next backup at: ${this.config.backupSchedule.getNextTime()?.toISOString() || 'N/A'}`);
+    if (this.config.cleanupSchedule) {
+      this.logger.log(`Previous cleanup at: ${this.config.cleanupSchedule.getPrevTime()?.toISOString() || 'N/A'}`);
+      this.logger.log(`Next cleanup at: ${this.config.cleanupSchedule.getNextTime()?.toISOString() || 'N/A'}`);
+    }
+    this.logger.log('------------------------------------');
   }
 
   // Example endpoint value

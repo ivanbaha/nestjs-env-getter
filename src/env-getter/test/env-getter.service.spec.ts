@@ -255,6 +255,97 @@ describe("Env Getter Service", () => {
     });
   });
 
+  describe("getRequiredCron", () => {
+    afterEach(() => {
+      delete process.env.TEST_CRON;
+    });
+
+    it("should return a CronSchedule instance for a valid 5-field cron expression", () => {
+      process.env.TEST_CRON = "0 2 * * *";
+
+      const result = service.getRequiredCron("TEST_CRON");
+
+      expect(result).toBeDefined();
+      expect(result.toString()).toBe("0 2 * * *");
+    });
+
+    it("should return a CronSchedule instance for a valid 6-field cron expression", () => {
+      process.env.TEST_CRON = "30 0 2 * * MON-FRI";
+
+      const result = service.getRequiredCron("TEST_CRON");
+
+      expect(result).toBeDefined();
+      expect(result.toString()).toBe("30 0 2 * * MON-FRI");
+    });
+
+    it("should stop process if the environment variable is missing", () => {
+      service.getRequiredCron("MISSING_CRON");
+
+      expect(service["stopProcess"]).toHaveBeenCalledWith("Missing 'MISSING_CRON' environment variable");
+    });
+
+    it("should stop process if the cron expression is invalid", () => {
+      process.env.TEST_CRON = "invalid-cron";
+
+      service.getRequiredCron("TEST_CRON");
+
+      expect(service["stopProcess"]).toHaveBeenCalledWith(
+        "Variable 'TEST_CRON' is not a valid cron expression. Expected 5 or 6 fields: [second] minute hour day-of-month month day-of-week",
+      );
+    });
+
+    it("should stop process for out-of-range values like 60 24 * * *", () => {
+      process.env.TEST_CRON = "60 24 * * *";
+
+      service.getRequiredCron("TEST_CRON");
+
+      expect(service["stopProcess"]).toHaveBeenCalledWith(
+        "Variable 'TEST_CRON' is not a valid cron expression. Expected 5 or 6 fields: [second] minute hour day-of-month month day-of-week",
+      );
+    });
+  });
+
+  describe("getOptionalCron", () => {
+    afterEach(() => {
+      delete process.env.TEST_CRON_OPT;
+    });
+
+    it("should return undefined if the environment variable is not set", () => {
+      const result = service.getOptionalCron("TEST_CRON_OPT");
+
+      expect(result).toBeUndefined();
+    });
+
+    it("should return a CronSchedule instance for a valid cron expression", () => {
+      process.env.TEST_CRON_OPT = "*/15 * * * *";
+
+      const result = service.getOptionalCron("TEST_CRON_OPT");
+
+      expect(result).toBeDefined();
+      expect(result?.toString()).toBe("*/15 * * * *");
+    });
+
+    it("should stop process if the cron expression is invalid", () => {
+      process.env.TEST_CRON_OPT = "not a cron";
+
+      service.getOptionalCron("TEST_CRON_OPT");
+
+      expect(service["stopProcess"]).toHaveBeenCalledWith(
+        "Variable 'TEST_CRON_OPT' is not a valid cron expression. Expected 5 or 6 fields: [second] minute hour day-of-month month day-of-week",
+      );
+    });
+
+    it("should stop process for invalid 6-field expression", () => {
+      process.env.TEST_CRON_OPT = "60 60 25 32 13 8";
+
+      service.getOptionalCron("TEST_CRON_OPT");
+
+      expect(service["stopProcess"]).toHaveBeenCalledWith(
+        "Variable 'TEST_CRON_OPT' is not a valid cron expression. Expected 5 or 6 fields: [second] minute hour day-of-month month day-of-week",
+      );
+    });
+  });
+
   describe("getOptionalConfigFromFile", () => {
     afterEach(() => {
       // Clean up any watchers to prevent interference between tests
