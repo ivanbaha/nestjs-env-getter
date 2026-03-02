@@ -433,7 +433,7 @@ export function parseEnvFile(filePath: string, options: EnvParseOptions = {}): E
     if (options.accumulate) {
       return { variables: {}, errors: [error], success: false };
     }
-    throw new Error(error.message);
+    throw new Error(error.message, { cause: err });
   }
 }
 

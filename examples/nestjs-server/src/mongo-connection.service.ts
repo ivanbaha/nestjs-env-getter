@@ -21,11 +21,11 @@ export class MongoConnectionService implements OnModuleInit, OnModuleDestroy {
     // Subscribe to config file changes
     this.config.mongoConfigs.on('updated', (event) => {
       this.logger.log(`🔔 MongoDB config updated from ${event.filePath}`);
-      this.handleConfigUpdate();
+      void this.handleConfigUpdate();
     });
   }
 
-  async onModuleInit() {
+  onModuleInit() {
     // Monitor connection state and log events
     this.connection.on('connected', () => {
       this.logger.log('✅ MongoDB connected');
@@ -61,7 +61,7 @@ export class MongoConnectionService implements OnModuleInit, OnModuleDestroy {
 
       try {
         // Close existing connection gracefully
-        if (this.connection.readyState !== 0) {
+        if (this.getConnectionStatus() !== 'disconnected') {
           await this.connection.close(false);
           this.logger.log('   Connection closed');
         }
