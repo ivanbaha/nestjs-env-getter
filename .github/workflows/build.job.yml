@@ -3,36 +3,32 @@ permissions:
   contents: read
 
 jobs:
-  publish:
+  build:
     name: Build project
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: "20"
           registry-url: "https://registry.npmjs.org/"
+          cache: "yarn"
+          cache-dependency-path: yarn.lock
 
-      - name: Restore node_modules from cache
-        uses: actions/cache@v4
-        with:
-          path: node_modules
-          key: ${{ runner.os }}-node_modules-${{ hashFiles('yarn.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-node_modules-
+      - name: Install dependencies with Yarn
+        run: yarn install --frozen-lockfile
 
       - name: Build Project
         run: yarn build
         continue-on-error: false
 
-      - name: Cache dist
-        uses: actions/cache@v4
+      - name: Upload dist artifact
+        uses: actions/upload-artifact@v7
         with:
           path: dist
-          key: ${{ runner.os }}-dist-${{ github.sha }}
-          restore-keys: |
-            ${{ runner.os }}-dist-
+          name: dist-${{ github.sha }}
+          if-no-files-found: error

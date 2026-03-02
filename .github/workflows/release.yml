@@ -10,24 +10,17 @@ on:
     types: [published]
 
 jobs:
-  install:
-    uses: ./.github/workflows/install.job.yml
-
   lint:
-    needs: install
     uses: ./.github/workflows/lint.job.yml
 
   typecheck:
-    needs: install
     uses: ./.github/workflows/typecheck.job.yml
 
   tests:
-    needs: install
     uses: ./.github/workflows/unit-tests.job.yml
 
   build:
     needs:
-      - install
       - lint
       - typecheck
       - tests
@@ -35,7 +28,6 @@ jobs:
 
   publish:
     needs:
-      - install
       - build
     uses: ./.github/workflows/publish.job.yml
     secrets:
