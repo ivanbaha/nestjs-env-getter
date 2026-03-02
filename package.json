@@ -29,7 +29,7 @@
         "build": "tsc --p tsconfig.build.json",
         "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
         "lint": "eslint --fix",
-        "lint:report": "eslint",
+        "lint:report": "eslint --ignore-pattern \"examples/**\"",
         "test": "jest",
         "test:report": "jest --ci --coverage --runInBand",
         "typecheck": "tsc --noEmit --p tsconfig.build.json"

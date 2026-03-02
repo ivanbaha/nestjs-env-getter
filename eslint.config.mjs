@@ -2,7 +2,11 @@ import js from "@eslint/js";
 import jsdoc from "eslint-plugin-jsdoc";
 import prettier from "eslint-plugin-prettier/recommended";
 import globals from "globals";
+import { dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import tseslint from "typescript-eslint";
+
+const tsconfigRootDir = dirname(fileURLToPath(import.meta.url));
 
 /** @type {import('eslint').Linter.Config[]} */
 export default [
@@ -12,6 +16,12 @@ export default [
   jsdoc.configs["flat/recommended"],
   {
     files: ["**/*.{js,mjs,cjs,ts}"],
+
+    languageOptions: {
+      parserOptions: {
+        tsconfigRootDir,
+      },
+    },
 
     plugins: {
       jsdoc,
