@@ -56,7 +56,7 @@ export class EnvGetterService implements OnModuleDestroy {
    * Event emitter for config file change events.
    * Emits 'updated' and 'error' events globally for all config files.
    */
-  readonly events = new EventEmitter();
+  readonly events: EventEmitter = new EventEmitter();
 
   constructor() {
     loadEnvFile(".env", { quiet: true });
