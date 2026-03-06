@@ -9,14 +9,13 @@ import { TasksModule } from './tasks/tasks.module';
 // Import the configuration module from the local nestjs-env-getter source
 import { AppConfigModule } from 'nestjs-env-getter';
 import { MongoConnectionService } from './mongo-connection.service';
+import { AppConfigOptionsService } from './app-config-options.service';
 
 @Module({
   imports: [
-    // Register the custom AppConfig class using nestjs-env-getter with additional providers
-    AppConfigModule.forRoot({
+    AppConfigModule.forRootAsync({
       useClass: AppConfig,
-      // Inject the options service if necessary
-      // providers: [AppConfigOptionsService],
+      providers: [AppConfigOptionsService],
     }),
 
     // Use AppConfig to provide MongoDB connection string from config file

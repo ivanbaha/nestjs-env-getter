@@ -7,6 +7,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.2] - 2026-03-06
+
+### Fixed
+
+- **TypeScript TS2742 Compatibility**: Replaced `Type<unknown>` from `@nestjs/common` with the local `ClassConstructor` type in `AppConfigModule`'s public API to prevent `TS2742` errors in consumer projects.
+- **Boolean Validation Regex**: Anchored the regex in `getRequiredBooleanEnv` so values like `"falsehood"` no longer pass validation.
+- **`getOptionalEnv` Empty String Handling**: Changed fallback operator from `||` to `??` so that an explicitly set empty string is preserved.
+- **`getOptionalNumericEnv` Undefined Handling**: Now correctly returns the default value when the variable is not set instead of parsing `"undefined"`.
+- **Prototype Pollution Hardening**: Added deep sanitization of parsed JSON to strip unsafe keys (`__proto__`, `constructor`, `prototype`) from nested objects. Initialized `configsStorage` with `Object.create(null)`.
+- **Safe `hasOwnProperty` Calls**: Replaced direct `process.env.hasOwnProperty()` with `Object.prototype.hasOwnProperty.call()`.
+
+### Changed
+
+- **Exported `APP_CONFIG` Token**: The injection token used by `forRootAsync` with `useFactory` is now exported as the constant `APP_CONFIG`.
+- **`forRoot` `imports` Type**: Changed `imports?: any[]` to `imports?: ModuleMetadata["imports"]` for consistency with `forRootAsync`.
+- **Event Method Descriptors**: Changed `configurable` from `false` to `true` on config instance event properties, allowing cleanup when needed.
+- **Deduplicated Cron Field Parser**: Removed the duplicate `parseFieldForValidation` function; validation now reuses `parseCronField`.
+- **JSDoc Accuracy**: Updated all JSDoc comments that said "Terminates the process" to `@throws {Error}`.
+- **README & Example Updates**: Documented `APP_CONFIG` token, added `EnvGetterModule` vs `AppConfigModule` comparison, updated error-handling language, and updated the example project to cover all available functionality.
+
 ## [1.1.1] - 2026-03-02
 
 ### Fixed

@@ -6,8 +6,8 @@
 
 - **Type-Safe Retrieval**: Get environment variables as strings, numbers, booleans, URLs, objects, arrays, or time periods.
 - **Built-in Validation**: Validate variables against allowed values or use custom validation functions.
-- **Required vs. Optional**: Clearly distinguish between required variables that terminate the process if missing and optional ones with default values.
-- **Error Handling**: Automatically terminates the process with a descriptive error message if a required variable is missing or invalid.
+- **Required vs. Optional**: Clearly distinguish between required variables that throw an error if missing and optional ones with default values.
+- **Error Handling**: Throws a descriptive error if a required variable is missing or invalid.
 - **`.env` Support**: Built-in parser with variable interpolation, multiline strings, and system env priority.
 - **Configuration Scaffolding**: Includes a CLI helper to quickly set up a centralized configuration file.
 
@@ -102,6 +102,39 @@ export class DatabaseService {
 
 This approach centralizes your environment variable management, making your application cleaner and easier to maintain.
 
+### Using `forRootAsync` with a Factory
+
+For more complex scenarios (e.g., async initialization), use `forRootAsync` with a factory function. Inject the resulting config using the exported `APP_CONFIG` token:
+
+```typescript
+import { Module, Inject } from "@nestjs/common";
+import { AppConfigModule, APP_CONFIG } from "nestjs-env-getter";
+
+@Module({
+  imports: [
+    AppConfigModule.forRootAsync({
+      useFactory: (/* injected deps */) => ({ port: 3000 }),
+    }),
+  ],
+})
+export class AppModule {}
+
+// In a service:
+@Injectable()
+export class SomeService {
+  constructor(@Inject(APP_CONFIG) private readonly config: { port: number }) {}
+}
+```
+
+### `EnvGetterModule` vs `AppConfigModule`
+
+> **These two modules are alternatives — do not import both.**
+
+| Module            | When to use                                                                               |
+| ----------------- | ----------------------------------------------------------------------------------------- |
+| `AppConfigModule` | Recommended. Provides `EnvGetterService` **and** registers a custom config class/factory. |
+| `EnvGetterModule` | Lightweight. Only provides `EnvGetterService` globally, without the config-class pattern. |
+
 ## CLI Helper
 
 You can scaffold the configuration file and module setup automatically with the built-in CLI command. Run this in the root of your NestJS project:
@@ -114,6 +147,10 @@ This command (shorthand `npx nestjs-env-getter i`) will:
 
 1. Create `src/app.config.ts` from a template.
 2. Import `AppConfigModule.forRoot({ useClass: AppConfig })` into your `src/app.module.ts`.
+
+## Example Project
+
+A full working NestJS application demonstrating all available functionality is available in the [examples](https://github.com/ivanbaha/nestjs-env-getter/tree/main/examples) directory on GitHub. The example project is not included in the npm package.
 
 ## API Reference (`EnvGetterService`)
 
@@ -346,7 +383,7 @@ Load and validate configuration from JSON files with automatic file watching and
 
 - **`getOptionalConfigFromFile<T>(filePath: string, defaultValue?: T, cls?: ClassConstructor<T>, watcherOptions?: FileWatcherOptions): T | undefined`**
 
-  Reads an optional JSON configuration file. Returns the default value if the file doesn't exist or cannot be parsed as JSON. Only terminates the process if validation fails (when using a class constructor).
+  Reads an optional JSON configuration file. Returns the default value if the file doesn't exist or cannot be parsed as JSON. Only throws an error if validation fails (when using a class constructor).
 
   ```typescript
   // With class validation
@@ -373,15 +410,15 @@ Load and validate configuration from JSON files with automatic file watching and
   );
 
   // Note: Optional config files are graceful - missing files or JSON parsing errors
-  // return the default value (or undefined). Only validation errors crash the process.
+  // return the default value (or undefined). Only validation errors throw.
   ```
 
 #### ⚠️ Important: Error Handling Behavior
 
 **Required vs Optional Config Files:**
 
-- **`getRequiredConfigFromFile`**: Crashes the process if the file is missing, has invalid JSON, or fails validation.
-- **`getOptionalConfigFromFile`**: Only crashes the process on validation errors (when using class constructors). Missing files or JSON parsing errors gracefully return the default value or `undefined`.
+- **`getRequiredConfigFromFile`**: Throws an error if the file is missing, has invalid JSON, or fails validation.
+- **`getOptionalConfigFromFile`**: Only throws on validation errors (when using class constructors). Missing files or JSON parsing errors gracefully return the default value or `undefined`.
 
 This design ensures that optional configurations truly are optional - your application won't crash due to missing or malformed optional config files, but validation constraints are still enforced when files are present and parsable.
 
@@ -456,7 +493,7 @@ When the file watcher detects changes, it updates the **same object instance** i
 - ✅ Debouncing to prevent excessive re-reads
 - ✅ Class-based validation with constructor pattern
 - ✅ **Graceful error handling for optional configs** - missing files or JSON parsing errors return default values
-- ✅ Process termination only on validation errors (required configs crash on any error)
+- ✅ Process termination only on validation errors (required configs throw on any error)
 - ✅ **Event methods attached to default values** - consistent API even when files don't exist
 - ✅ No application restart needed - changes apply immediately when using object references
 

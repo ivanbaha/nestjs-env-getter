@@ -3,15 +3,21 @@ import {
   DynamicModule,
   Global,
   Provider,
-  Type,
   InjectionToken,
   OptionalFactoryDependency,
   ModuleMetadata,
 } from "@nestjs/common";
 import { EnvGetterService } from "../env-getter/env-getter.service";
+import { ClassConstructor } from "../shared/types/class-constructor.type";
+
+/**
+ * Injection token used by `AppConfigModule.forRootAsync` with `useFactory`.
+ * Use `@Inject(APP_CONFIG)` to inject the config created by the factory.
+ */
+export const APP_CONFIG = "APP_CONFIG";
 
 export interface AppConfigModuleOptions {
-  useClass?: Type<unknown>;
+  useClass?: ClassConstructor;
   useFactory?: (...args: unknown[]) => unknown;
   inject?: (InjectionToken | OptionalFactoryDependency)[];
   imports?: ModuleMetadata["imports"];
@@ -21,7 +27,11 @@ export interface AppConfigModuleOptions {
 @Global()
 @Module({})
 export class AppConfigModule {
-  static forRoot(options: { useClass: Type<unknown>; imports?: any[]; providers?: Provider[] }): DynamicModule {
+  static forRoot(options: {
+    useClass: ClassConstructor;
+    imports?: ModuleMetadata["imports"];
+    providers?: Provider[];
+  }): DynamicModule {
     const provider: Provider = { provide: options.useClass, useClass: options.useClass };
     const additionalProviders = options.providers || [];
 
@@ -38,7 +48,7 @@ export class AppConfigModule {
 
     if (options.useFactory) {
       const provider: Provider = {
-        provide: "APP_CONFIG",
+        provide: APP_CONFIG,
         useFactory: options.useFactory,
         inject: options.inject || [],
       };

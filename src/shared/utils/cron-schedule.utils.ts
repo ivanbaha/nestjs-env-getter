@@ -136,67 +136,6 @@ const maxDaysInMonth: Record<number, number> = {
 };
 
 /**
- * Parses a cron field into an array of matching values for validation purposes.
- * This is a simplified version used only during validation.
- * @param field - The cron field string.
- * @param min - The minimum allowed value.
- * @param max - The maximum allowed value.
- * @returns An array of matching values.
- */
-function parseFieldForValidation(field: string, min: number, max: number): number[] {
-  // Handle wildcard
-  if (field === "*") {
-    const result: number[] = [];
-    for (let i = min; i <= max; i++) {
-      result.push(i);
-    }
-    return result;
-  }
-
-  // Handle step values (e.g., */5, 1-10/2)
-  const stepMatch = /^(.+)\/(\d+)$/.exec(field);
-  if (stepMatch) {
-    const base = stepMatch[1] as string;
-    const step = stepMatch[2] as string;
-    const stepNum = parseInt(step, 10);
-    const baseValues = parseFieldForValidation(base, min, max);
-    const result: number[] = [];
-    for (let i = 0; i < baseValues.length; i += stepNum) {
-      result.push(baseValues[i] as number);
-    }
-    return result;
-  }
-
-  // Handle ranges (e.g., 1-5)
-  const rangeMatch = /^(\d+)-(\d+)$/.exec(field);
-  if (rangeMatch) {
-    const start = rangeMatch[1] as string;
-    const end = rangeMatch[2] as string;
-    const startNum = parseInt(start, 10);
-    const endNum = parseInt(end, 10);
-    const result: number[] = [];
-    for (let i = startNum; i <= endNum; i++) {
-      result.push(i);
-    }
-    return result;
-  }
-
-  // Handle lists (e.g., 1,3,5)
-  if (field.includes(",")) {
-    const parts = field.split(",");
-    const result: number[] = [];
-    for (const part of parts) {
-      result.push(...parseFieldForValidation(part.trim(), min, max));
-    }
-    return [...new Set(result)].sort((a, b) => a - b);
-  }
-
-  // Handle single numeric values
-  const num = parseInt(field, 10);
-  return [num];
-}
-
-/**
  * Checks if the day-of-month and month combination can ever match.
  * For example, Feb 31st is impossible since February never has 31 days.
  * @param days - Array of days of month.
@@ -275,8 +214,8 @@ export function isValidCronExpression(value: string): boolean {
 
   // If day-of-week is wildcard, day-of-month must be achievable
   if (dayOfWeekField === "*" && dayOfMonthField !== "*") {
-    const days = parseFieldForValidation(dayOfMonthField, 1, 31);
-    const months = parseFieldForValidation(monthField, 1, 12);
+    const days = parseCronField(dayOfMonthField, 1, 31);
+    const months = parseCronField(monthField, 1, 12);
 
     if (!isDayMonthCombinationPossible(days, months)) {
       return false;

@@ -49,7 +49,29 @@ export class EnvGetterService implements OnModuleDestroy {
     }
     return copy;
   }
-  private readonly configsStorage: Record<string, unknown> = {};
+
+  /**
+   * Recursively removes unsafe keys (`__proto__`, `constructor`, `prototype`)
+   * from an object and all nested objects/arrays to prevent prototype pollution.
+   * @param value - The value to sanitize.
+   * @returns The sanitized value.
+   */
+  private deepSanitize<T>(value: T): T {
+    if (Array.isArray(value)) {
+      return value.map((item) => this.deepSanitize(item)) as T;
+    }
+    if (value !== null && typeof value === "object") {
+      const sanitized: Record<string, unknown> = Object.create(null);
+      for (const key of Object.keys(value)) {
+        if (!this.isUnsafeKey(key)) {
+          sanitized[key] = this.deepSanitize((value as Record<string, unknown>)[key]);
+        }
+      }
+      return sanitized as T;
+    }
+    return value;
+  }
+  private readonly configsStorage: Record<string, unknown> = Object.create(null);
   private readonly fileWatchers = new Map<string, ReturnType<typeof watch>>();
 
   /**
@@ -81,17 +103,17 @@ export class EnvGetterService implements OnModuleDestroy {
    * @returns `true` if the environment variable exists, otherwise `false`.
    */
   isEnvSet(envName: string): boolean {
-    return process.env.hasOwnProperty(envName);
+    return Object.prototype.hasOwnProperty.call(process.env, envName);
   }
 
   /**
    * Retrieves the value of a required environment variable.
-   * - Ensures that the variable exists; otherwise, the process is terminated.
+   * - Ensures that the variable exists; otherwise, throws an error.
    * - If `allowedValues` is provided, checks whether the variable contains an allowed value.
    * @param envName - The name of the required environment variable.
    * @param allowedValues - (Optional) A list of allowed values for validation.
    * @returns The environment variable value as a string.
-   * @throws Terminates the process if the variable is missing or contains an invalid value.
+   * @throws {Error} If the variable is missing or contains an invalid value.
    */
   getRequiredEnv(envName: string): string;
   getRequiredEnv(envName: string, allowedValues: string[]): string;
@@ -112,7 +134,7 @@ export class EnvGetterService implements OnModuleDestroy {
    * @param defaultValue - (Optional) The default value to return if the environment variable is not set.
    * @param allowedValues - (Optional) An array of allowed values for validation.
    * @returns The environment variable value, the default value, or `undefined` if not set.
-   * @throws Terminates the process if the value is not in `allowedValues` (if provided).
+   * @throws {Error} If the value is not in `allowedValues` (if provided).
    */
   getOptionalEnv(envName: string): string | undefined;
   getOptionalEnv(envName: string, defaultValue: string): string;
@@ -130,7 +152,7 @@ export class EnvGetterService implements OnModuleDestroy {
 
       return envValue;
     } else {
-      const envValue = process.env[envName] || defaultValueOrAllowedValues;
+      const envValue = process.env[envName] ?? defaultValueOrAllowedValues;
 
       if (allowedValues?.length) this.checkIfEnvHasAllowedValue(envName, envValue ?? null, allowedValues);
 
@@ -142,10 +164,10 @@ export class EnvGetterService implements OnModuleDestroy {
    * Retrieves and validates a required numeric environment variable.
    * - Ensures the variable is set and contains only numeric characters (or underscores).
    * - Converts the value to a number.
-   * - Terminates the process if the value is not numeric.
+   * - Throws an error if the value is not numeric.
    * @param envName - The name of the environment variable.
    * @returns The numeric value of the environment variable.
-   * @throws Terminates the process if the variable is missing or not numeric.
+   * @throws {Error} If the variable is missing or not numeric.
    */
   getRequiredNumericEnv(envName: string): number {
     const envVal = this.getRequiredEnv(envName);
@@ -166,24 +188,26 @@ export class EnvGetterService implements OnModuleDestroy {
   getOptionalNumericEnv(envName: string): number | undefined;
   getOptionalNumericEnv(envName: string, defaultValue: number): number;
   getOptionalNumericEnv(envName: string, defaultValue?: number): number | undefined {
-    const envVal = String(process.env[envName]);
+    const rawVal = process.env[envName];
 
-    return /^[0-9_]+$/.test(envVal) ? Number(envVal.replace(/_/g, "")) : defaultValue;
+    if (rawVal === undefined) return defaultValue;
+
+    return /^[0-9_]+$/.test(rawVal) ? Number(rawVal.replace(/_/g, "")) : defaultValue;
   }
 
   /**
    * Retrieves and validates a required boolean environment variable.
    * - Ensures the variable is set and contains either `"true"` or `"false"`.
    * - Converts the value to a boolean.
-   * - Terminates the process if the value is not a valid boolean.
+   * - Throws an error if the value is not a valid boolean.
    * @param envName - The name of the environment variable.
    * @returns The boolean value of the environment variable.
-   * @throws Terminates the process if the variable is missing or not `"true"`/`"false"`.
+   * @throws {Error} If the variable is missing or not `"true"`/`"false"`.
    */
   getRequiredBooleanEnv(envName: string): boolean {
     const envVal = this.getRequiredEnv(envName);
 
-    if (!/true|false/.test(envVal)) this.stopProcess(`Variable '${envName}' is not of boolean type.`);
+    if (!/^(true|false)$/.test(envVal)) this.stopProcess(`Variable '${envName}' is not of boolean type.`);
 
     return envVal === "true";
   }
@@ -205,10 +229,10 @@ export class EnvGetterService implements OnModuleDestroy {
   /**
    * Retrieves and validates a required environment variable as a URL.
    * - Ensures the variable is set and contains a valid URL.
-   * - Terminates the process if the value is not a valid URL.
+   * - Throws an error if the value is not a valid URL.
    * @param envName - The name of the environment variable.
    * @returns A `URL` object representing the value of the environment variable.
-   * @throws Terminates the process if the variable is missing or not a valid URL.
+   * @throws {Error} If the variable is missing or not a valid URL.
    */
   getRequiredURL(envName: string): URL {
     const envVal = this.getRequiredEnv(envName);
@@ -224,11 +248,11 @@ export class EnvGetterService implements OnModuleDestroy {
    * Retrieves an optional environment variable as a URL.
    * - If the variable is set and a valid URL, returns a `URL` object.
    * - If `defaultValue` is provided and the variable is not set, returns the default `URL`.
-   * - Terminates the process if the variable is set but not a valid URL.
+   * - Throws an error if the variable is set but not a valid URL.
    * @param envName - The name of the environment variable.
    * @param defaultValue - (Optional) The default URL value to return if the variable is not set.
    * @returns A `URL` object representing the value of the environment variable or the default value.
-   * @throws Terminates the process if the variable is set but not a valid URL.
+   * @throws {Error} If the variable is set but not a valid URL.
    */
   getOptionalURL(envName: string): URL | undefined;
   getOptionalURL(envName: string, defaultValue: URL): URL;
@@ -247,7 +271,7 @@ export class EnvGetterService implements OnModuleDestroy {
    * - Ensures the environment variable is set and retrieves its value.
    * - Validates that the value follows the format: `<number><"ms"|"s"|"m"|"h"|"d">`.
    * - Converts the value to the specified time format.
-   * - Terminates the process if the value is missing or invalid.
+   * - Throws an error if the value is missing or invalid.
    * @param envName - The name of the required environment variable.
    * @param resultIn - The desired time unit for the result (default is `"ms"`).
    * @returns The parsed time period converted to the specified unit.
@@ -270,7 +294,7 @@ export class EnvGetterService implements OnModuleDestroy {
    * - If the environment variable is not set, it falls back to the provided default value.
    * - Validates that the value is in the acceptable format: `<number><"ms"|"s"|"m"|"h"|"d">`.
    * - Converts the value to the specified time format.
-   * - Terminates the process if the value is invalid.
+   * - Throws an error if the value is invalid.
    * @param envName - The name of the environment variable to retrieve.
    * @param defaultValue - The default time period to use if the environment variable is not set.
    * @param resultIn - The desired time unit for the result (default is `"ms"`).
@@ -297,10 +321,10 @@ export class EnvGetterService implements OnModuleDestroy {
    * - Ensures the environment variable is set.
    * - Validates that the value is a valid cron expression (5 or 6 fields).
    * - Returns a CronSchedule instance with utility methods.
-   * - Terminates the process if the variable is missing or invalid.
+   * - Throws an error if the variable is missing or invalid.
    * @param envName - The name of the required environment variable.
    * @returns A CronSchedule instance wrapping the validated cron expression.
-   * @throws Terminates the process if the variable is missing or not a valid cron expression.
+   * @throws {Error} If the variable is missing or not a valid cron expression.
    * @example
    * // 5-field format: minute hour day-of-month month day-of-week
    * const schedule = this.envGetter.getRequiredCron('BACKUP_SCHEDULE');
@@ -328,10 +352,10 @@ export class EnvGetterService implements OnModuleDestroy {
    * Retrieves and parses an optional environment variable as a cron schedule.
    * - If the variable is not set, returns undefined.
    * - If the variable is set, validates that it is a valid cron expression.
-   * - Terminates the process if the variable is set but contains an invalid cron expression.
+   * - Throws an error if the variable is set but contains an invalid cron expression.
    * @param envName - The name of the environment variable.
    * @returns A CronSchedule instance if the variable is set and valid, undefined otherwise.
-   * @throws Terminates the process if the variable is set but not a valid cron expression.
+   * @throws {Error} If the variable is set but not a valid cron expression.
    * @example
    * // Optional cron without default - returns undefined if not set
    * const schedule = this.envGetter.getOptionalCron('CLEANUP_SCHEDULE');
@@ -365,12 +389,12 @@ export class EnvGetterService implements OnModuleDestroy {
    * - Ensures the environment variable is set.
    * - Parses the value from a JSON string into an object.
    * - Optionally validates and instantiates the object using a provided class.
-   * - Terminates the process if parsing fails or if instantiation using the class fails.
+   * - Throws an error if parsing fails or if instantiation using the class fails.
    * @template R - The expected type of the parsed object.
    * @param envName - The name of the environment variable.
    * @param cls - (Optional) A class constructor to validate and instantiate the parsed object.
    * @returns The parsed object, optionally instantiated as an instance of `cls`.
-   * @throws Terminates the process if the environment variable is missing, cannot be parsed, or fails validation.
+   * @throws {Error} If the environment variable is missing, cannot be parsed, or fails validation.
    * @example
    * // Define a class for validation
    * class Config {
@@ -400,7 +424,7 @@ export class EnvGetterService implements OnModuleDestroy {
     let parsedObj: Record<string, unknown>;
 
     try {
-      parsedObj = JSON.parse(envVal);
+      parsedObj = this.deepSanitize(JSON.parse(envVal));
     } catch (error: unknown) {
       this.stopProcess(`${baseErrorMessage} ${this.getErrorMessage(error)}`);
     }
@@ -480,14 +504,14 @@ export class EnvGetterService implements OnModuleDestroy {
    * - Reads and parses the JSON content.
    * - Optionally validates and instantiates using a provided class.
    * - Sets up a file watcher to automatically reload the config on file changes.
-   * - Terminates the process if the file is missing, cannot be parsed, or fails validation.
+   * - Throws an error if the file is missing, cannot be parsed, or fails validation.
    * @template R - The expected type of the parsed config.
    * @template C - The class constructor type (if provided).
    * @param filePath - The path to the config file (absolute or relative to process.cwd()).
    * @param cls - (Optional) A class constructor to validate and instantiate the parsed config.
    * @param watcherOptions - (Optional) Configuration for file watching behavior.
    * @returns The parsed config, optionally instantiated as an instance of `cls`. The returned value will always reflect the latest file content.
-   * @throws Terminates the process if the file is missing, cannot be parsed, or fails validation.
+   * @throws {Error} If the file is missing, cannot be parsed, or fails validation.
    * @example
    * // Without class validation
    * const config = this.envGetter.getRequiredConfigFromFile<{ apiKey: string }>('config.json');
@@ -539,7 +563,7 @@ export class EnvGetterService implements OnModuleDestroy {
    * - Default values are enhanced with event methods for consistency.
    * - Optionally validates and instantiates using a provided class.
    * - Sets up a file watcher to automatically reload the config on file changes (if file exists).
-   * - Only terminates the process if validation fails (when using a class constructor).
+   * - Only throws an error if validation fails (when using a class constructor).
    * @template R - The expected type of the parsed config.
    * @template C - The class constructor type (if provided).
    * @param filePath - The path to the config file (absolute or relative to process.cwd()).
@@ -547,7 +571,7 @@ export class EnvGetterService implements OnModuleDestroy {
    * @param cls - (Optional) A class constructor to validate and instantiate the parsed config.
    * @param watcherOptions - (Optional) Configuration for file watching behavior.
    * @returns The parsed config, the default value (with event methods), or undefined. The returned value will always reflect the latest file content if the file exists.
-   * @throws Terminates the process only if validation fails (when using a class constructor).
+   * @throws {Error} Only if validation fails (when using a class constructor).
    * @example
    * // Without default value
    * const config = this.envGetter.getOptionalConfigFromFile<{ apiKey?: string }>('config.json');
@@ -719,9 +743,9 @@ export class EnvGetterService implements OnModuleDestroy {
   }
 
   /**
-   * Logs an error message in red and terminates the process.
-   * @param message - The error message to display before exiting.
-   * @throws Never returns; always exits the process.
+   * Logs an error message in red and throws an error.
+   * @param message - The error message to display.
+   * @throws {Error} Always throws; never returns.
    * @private
    */
   private stopProcess(message: string): never {
@@ -732,25 +756,26 @@ export class EnvGetterService implements OnModuleDestroy {
 
   /**
    * Checks if an environment variable exists.
-   * - If the variable is missing, the process is terminated.
+   * - If the variable is missing, throws an error.
    * - If the variable exists, returns `true`.
    * @param envName - The name of the environment variable to check.
    * @returns `true` if the environment variable exists.
-   * @throws Terminates the process if the variable is missing.
+   * @throws {Error} If the variable is missing.
    * @private
    */
   private checkEnvExisting(envName: string): boolean | never {
-    if (!process.env.hasOwnProperty(envName)) this.stopProcess(`Missing '${envName}' environment variable`);
+    if (!Object.prototype.hasOwnProperty.call(process.env, envName))
+      this.stopProcess(`Missing '${envName}' environment variable`);
     return true;
   }
 
   /**
    * Validates whether an environment variable contains an allowed value.
-   * - If the variable's value is not in the allowed list, the process is terminated.
+   * - If the variable's value is not in the allowed list, throws an error.
    * @param envName - The name of the environment variable.
    * @param envVal - The current value of the environment variable.
    * @param allowedValues - An array of allowed values for the variable.
-   * @throws Terminates the process if `envVal` is not in the allowed list.
+   * @throws {Error} If `envVal` is not in the allowed list.
    * @private
    */
   private checkIfEnvHasAllowedValue(envName: string, envVal: string | null, allowedValues: string[]): void | never {
@@ -784,7 +809,7 @@ export class EnvGetterService implements OnModuleDestroy {
    * @param breakOnError - Whether to stop the process on errors. Only applies when isInitialLoad is false.
    * @param isOptional - Whether this is for an optional config file. If true, file reading and JSON parsing errors are thrown without crashing the process, but validation errors still crash the process.
    * @returns The parsed config, optionally instantiated as an instance of `cls`.
-   * @throws Terminates the process if the file cannot be read, parsed, or validated (on initial load or if breakOnError is true). For optional configs, only validation errors crash the process, other errors are thrown.
+   * @throws {Error} If the file cannot be read, parsed, or validated (on initial load or if breakOnError is true). For optional configs, only validation errors throw, other errors are re-thrown.
    * @private
    */
   private readAndParseConfigFile<R = unknown, C extends ClassConstructor<unknown> | undefined = undefined>(
@@ -809,7 +834,7 @@ export class EnvGetterService implements OnModuleDestroy {
 
     let parsedConfig: Record<string, unknown>;
     try {
-      parsedConfig = JSON.parse(fileContent);
+      parsedConfig = this.deepSanitize(JSON.parse(fileContent));
     } catch (error: unknown) {
       const err = error instanceof Error ? error : new Error(this.getErrorMessage(error));
       if ((isInitialLoad || breakOnError) && !isOptional) {
@@ -1003,7 +1028,7 @@ export class EnvGetterService implements OnModuleDestroy {
     Object.defineProperty(instance, "on", {
       enumerable: false,
       writable: false,
-      configurable: false,
+      configurable: true,
       value: (event: string, handler: (event: ConfigUpdatedEvent | ConfigErrorEvent) => void): Disposable => {
         const eventName = `${event}:${filePath}`;
         emitter.on(eventName, handler);
@@ -1016,7 +1041,7 @@ export class EnvGetterService implements OnModuleDestroy {
     Object.defineProperty(instance, "once", {
       enumerable: false,
       writable: false,
-      configurable: false,
+      configurable: true,
       value: (event: string, handler: (event: ConfigUpdatedEvent | ConfigErrorEvent) => void): Disposable => {
         const eventName = `${event}:${filePath}`;
         emitter.once(eventName, handler);
@@ -1029,7 +1054,7 @@ export class EnvGetterService implements OnModuleDestroy {
     Object.defineProperty(instance, "off", {
       enumerable: false,
       writable: false,
-      configurable: false,
+      configurable: true,
       value: (event: string, handler: (event: ConfigUpdatedEvent | ConfigErrorEvent) => void): void => {
         const eventName = `${event}:${filePath}`;
         emitter.off(eventName, handler);

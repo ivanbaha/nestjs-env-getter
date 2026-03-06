@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { FileWatcherOptions } from 'nestjs-env-getter';
 
 @Injectable()
 export class AppConfigOptionsService {
@@ -38,10 +39,17 @@ export class AppConfigOptionsService {
    * Get configuration options that can be used by AppConfig.
    */
   getConfigOptions() {
+    const environment = process.env.NODE_ENV || 'development';
+
     return {
+      environment,
       mongoCredentialsFile: this.getMongoCredentialsFilename(),
       testConfigFile: this.getTestConfigFilename(),
-      enableFileWatching: process.env.NODE_ENV !== 'production',
+      fileWatcherOptions: {
+        enabled: environment !== 'production',
+        debounceMs: 200,
+        breakOnError: false,
+      } as FileWatcherOptions,
     };
   }
 }

@@ -18,4 +18,9 @@ export class AppController {
   getTestConfigValue(): unknown {
     return this.appService.getTestConfigValue();
   }
+
+  @Get('config/grouped')
+  getGroupedConfigDiagnostics(): unknown {
+    return this.appService.getGroupedConfigDiagnostics();
+  }
 }
