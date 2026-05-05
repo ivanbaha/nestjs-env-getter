@@ -16,6 +16,6 @@
         "target": "es2019",
         "skipLibCheck": true,
         "lib": ["ES2022"],
-        "baseUrl": "./"
+        "types": ["node", "jest"]
     }
 }

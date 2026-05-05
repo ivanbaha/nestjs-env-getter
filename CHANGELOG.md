@@ -7,6 +7,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.3] - 2026-05-05
+
+### Changed
+
+- **Dev Dependencies**: Updated all dev dependencies to their latest versions. Includes TypeScript 6.0 migration (removed deprecated `baseUrl`, added explicit `types` and `rootDir` in tsconfig). Patched a transitive `path-to-regexp < 8.4.0` vulnerability in the example project via a yarn resolution override.
+
 ## [1.1.2] - 2026-03-06
 
 ### Fixed
