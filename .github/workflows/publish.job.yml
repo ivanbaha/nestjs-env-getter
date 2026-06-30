@@ -15,16 +15,16 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
 
       - name: Set up Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
-          node-version: "20"
+          node-version: "22"
           registry-url: "https://registry.npmjs.org/"
 
       - name: Download dist artifact
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: dist-${{ github.sha }}
           path: dist
@@ -32,4 +32,5 @@ jobs:
       - name: Publish package to npm
         run: npm publish --provenance --access public
         env:
+          # TODO: migrate to npm Trusted Publishing (OIDC) once npm resolves their issue; id-token: write is already present
           NODE_AUTH_TOKEN: ${{ secrets.NPM_REGISTRY_PAT }}

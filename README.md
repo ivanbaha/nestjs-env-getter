@@ -16,13 +16,13 @@
 The module includes a zero-dependency `.env` file parser. Key behaviors:
 
 - **System environment priority**: Variables already set in `process.env` are NOT overwritten by `.env` file values. This ensures CI/CD and Docker environment injections take precedence over local files.
-- **Variable interpolation**: Use `${VAR_NAME}` syntax to reference other variables.
+- **Variable interpolation**: Use `${VAR_NAME}` syntax to reference other variables. Interpolation inserts values verbatim — `$`-patterns like `pa$$w0rd` survive byte-for-byte.
 - **Quoting rules**:
-  - **Unquoted**: Value ends at `#` (comment) or end of line.
-  - **Single quotes** (`'`): Raw literal, no escape processing.
-  - **Double quotes** (`"`): Supports `\n`, `\t`, `\\`, `\"` escapes and multiline values.
+  - **Unquoted**: Value ends at `#` (comment) or end of line — `PASSWORD=ab#cd` yields `ab`, so **quote any value containing `#`**. Interpolation applies.
+  - **Single quotes** (`'`): Raw literal — no escape processing and **no interpolation** (`A='${B}'` stays `${B}`, dotenv convention).
+  - **Double quotes** (`"`): Supports `\n`, `\t`, `\\`, `\"` escapes and multiline values. Interpolation applies.
 - **`export` prefix**: Automatically stripped for shell compatibility.
-- **Empty values**: `KEY=` results in an empty string (not undefined).
+- **Empty values**: `KEY=` parses to an empty string in `process.env`, but all getters treat set-but-empty as **unset**: `getRequired*` throws a distinct `"set but empty"` error, `getOptional*` returns the default. Only `isEnvSet()` reports a pure existence check (`true` for `KEY=`).
 
 ## Installation
 
@@ -135,6 +135,35 @@ export class SomeService {
 | `AppConfigModule` | Recommended. Provides `EnvGetterService` **and** registers a custom config class/factory. |
 | `EnvGetterModule` | Lightweight. Only provides `EnvGetterService` globally, without the config-class pattern. |
 
+### Module Options
+
+By default the service loads `./.env` once at startup. `EnvGetterModule.forRoot(options)` customizes that (the plain `imports: [EnvGetterModule]` form keeps working unchanged):
+
+```typescript
+import { EnvGetterModule } from "nestjs-env-getter";
+
+@Module({
+  imports: [
+    EnvGetterModule.forRoot({
+      // Path(s) to load at startup; `false` disables the implicit .env load entirely.
+      envFilePath: [".env", ".env.local"], // string | string[] | false (default: ".env")
+      // Confine config-file resolution (getRequired/getOptionalConfigFromFile) to a
+      // directory tree. Any path escaping it terminates the app (path-traversal guard).
+      configBaseDir: "./configs",
+    }),
+  ],
+})
+export class AppModule {}
+```
+
+When using `AppConfigModule`, pass the same options through the `envGetter` field:
+
+```typescript
+AppConfigModule.forRoot({ useClass: AppConfig, envGetter: { envFilePath: false } });
+```
+
+`EnvGetterModuleOptions` and the `ENV_GETTER_OPTIONS` injection token are exported from the package root.
+
 ## CLI Helper
 
 You can scaffold the configuration file and module setup automatically with the built-in CLI command. Run this in the root of your NestJS project:
@@ -161,7 +190,7 @@ Here are detailed examples of the methods available in `EnvGetterService`.
 - **`getRequiredEnv(name: string, allowed?: string[]): string`**
 
   ```typescript
-  // Throws an error if DB_HOST is not set
+  // Throws an error if DB_HOST is not set (or set but empty)
   const dbHost = this.envGetter.getRequiredEnv("DB_HOST");
 
   // Throws an error if NODE_ENV is not 'development' or 'production'
@@ -173,40 +202,53 @@ Here are detailed examples of the methods available in `EnvGetterService`.
 
 - **`getOptionalEnv(name: string, default?: string, allowed?: string[]): string | undefined`**
 
+  Unset or empty (`KEY=`) → returns the default (or `undefined`). With an `allowed` list, the effective value (env value or provided default) is validated; an unset/empty variable with no default skips validation entirely — the variable stays truly optional.
+
   ```typescript
-  // Returns 'info' if LOG_LEVEL is not set
+  // Returns 'info' if LOG_LEVEL is not set or empty
   const logLevel = this.envGetter.getOptionalEnv("LOG_LEVEL", "info");
+
+  // Returns undefined if MODE is unset; throws only if MODE is set to something else
+  const mode = this.envGetter.getOptionalEnv("MODE", ["fast", "safe"]);
   ```
 
+  > !!! A disallowed value is **echoed in the error message** — never use the `allowed` list with secret variables.
+
 ### Number
+
+Numeric getters accept **integers only** — no decimals (`1.5`) and no scientific notation (`1e3`). Underscores may be used as digit-group separators, but only **between** digit groups (`1_000_000` is valid; `_1`, `1__2`, `12_` are not). Values beyond `Number.MAX_SAFE_INTEGER` are rejected rather than silently losing precision.
 
 - **`getRequiredNumericEnv(name: string): number`**
 
   ```typescript
-  // Throws an error if PORT is not a valid number
+  // Throws an error if PORT is missing, empty, not a valid integer, or unsafe
   const port = this.envGetter.getRequiredNumericEnv("PORT");
   ```
 
 - **`getOptionalNumericEnv(name: string, default?: number): number | undefined`**
 
   ```typescript
-  // Returns 3000 if TIMEOUT is not set or not a valid number
+  // Returns 3000 if TIMEOUT is not set or empty.
+  // A present-but-invalid value (e.g. TIMEOUT=abc) throws — it does NOT fall back.
   const timeout = this.envGetter.getOptionalNumericEnv("TIMEOUT", 3000);
   ```
 
 ### Boolean
 
+Boolean getters are strict and **case-sensitive**: only the exact strings `true` and `false` are accepted. Anything else (`TRUE`, `1`, `yes`, typos) throws instead of silently becoming `false` — a misspelled security toggle must fail loudly, not fail open.
+
 - **`getRequiredBooleanEnv(name: string): boolean`**
 
   ```typescript
-  // Throws an error if DEBUG_MODE is not 'true' or 'false'
+  // Throws an error if DEBUG_MODE is not exactly 'true' or 'false'
   const isDebug = this.envGetter.getRequiredBooleanEnv("DEBUG_MODE");
   ```
 
 - **`getOptionalBooleanEnv(name: string, default?: boolean): boolean | undefined`**
 
   ```typescript
-  // Returns false if ENABLE_SSL is not set
+  // Returns false if ENABLE_SSL is not set or empty; throws if set to anything
+  // other than exactly 'true'/'false'
   const useSsl = this.envGetter.getOptionalBooleanEnv("ENABLE_SSL", false);
   ```
 
@@ -223,13 +265,16 @@ Here are detailed examples of the methods available in `EnvGetterService`.
 
   ```typescript
   const defaultUrl = new URL("https://fallback.example.com");
-  // Returns defaultUrl if CDN_URL is not set or not a valid URL
+  // Returns defaultUrl if CDN_URL is not set or empty.
+  // A present-but-invalid URL throws — it does NOT fall back.
   const cdnUrl = this.envGetter.getOptionalURL("CDN_URL", defaultUrl);
   ```
 
 ### Time Period
 
 Parses a string like `'10s'`, `'5m'`, `'2h'`, `'1d'` into a numeric value.
+
+> Results are rounded **up** to the nearest integer (`Math.ceil`): `1500ms` requested in seconds yields `2`. Plain numbers are interpreted as milliseconds; non-finite or negative numbers are rejected.
 
 - **`getRequiredTimePeriod(name: string, resultIn: 'ms' | 's' | 'm' | 'h' | 'd' = 'ms'): number`**
 
@@ -244,16 +289,30 @@ Parses a string like `'10s'`, `'5m'`, `'2h'`, `'1d'` into a numeric value.
   );
   ```
 
-- **`getOptionalTimePeriod(name: string, default: string, resultIn: ...): number`**
+- **`getOptionalTimePeriod(...)`** — three overloads:
+  - `(name)` → `number | undefined` — `undefined` when unset/empty.
+  - `(name, resultIn)` → `number | undefined` — same, converted to the given unit.
+  - `(name, defaultValue, resultIn?)` → `number` — falls back to the default (a time string like `"30s"`, or a number of milliseconds).
 
   ```typescript
+  // undefined if SHUTDOWN_GRACE is not set; milliseconds if set
+  const grace = this.envGetter.getOptionalTimePeriod("SHUTDOWN_GRACE");
+
+  // undefined if not set; seconds if set
+  const graceSec = this.envGetter.getOptionalTimePeriod("SHUTDOWN_GRACE", "s");
+
   // Returns 60 (seconds) if JWT_EXPIRES_IN is not set
   const expiresIn = this.envGetter.getOptionalTimePeriod(
     "JWT_EXPIRES_IN",
     "1m",
     "s",
   );
+
+  // Number defaults are milliseconds: returns 5 (seconds) when unset
+  const timeout = this.envGetter.getOptionalTimePeriod("TIMEOUT", 5000, "s");
   ```
+
+  A set-but-invalid value throws for every form; an invalid `defaultValue` throws as well.
 
 ### Cron Expression
 
@@ -343,6 +402,10 @@ Parses cron expressions and returns a `CronSchedule` object with utility methods
 
 Load and validate configuration from JSON files with automatic file watching and hot-reload support.
 
+> !!! **`filePath` must never be derived from untrusted input** — it is handed to the filesystem (same trust contract as `fs.readFileSync`). To enforce confinement at runtime, set the `configBaseDir` module option (see [Module Options](#module-options)): any path resolving outside that directory terminates the app.
+>
+> **Defaults must be plain data.** A function-typed `defaultValue` is indistinguishable from a class constructor (`typeof === "function"`) and will be misread as `cls`.
+
 - **`getRequiredConfigFromFile<T>(filePath: string, cls?: ClassConstructor<T>, watcherOptions?: FileWatcherOptions): T`**
 
   Reads a required JSON configuration file. Automatically watches for file changes and updates the cached config.
@@ -422,7 +485,17 @@ Load and validate configuration from JSON files with automatic file watching and
 
 This design ensures that optional configurations truly are optional - your application won't crash due to missing or malformed optional config files, but validation constraints are still enforced when files are present and parsable.
 
-#### ⚠️ Important: Using Config Values by Reference
+#### Supported file-rotation patterns
+
+The watcher keeps configs live through all common secret-rotation flows:
+
+- **Atomic replace** (Vault agent: write temp file + `rename`) — the watcher re-establishes itself after each update.
+- **Delete → recreate** — on deletion an `error:<path>` event fires and a parent-directory watcher takes over; when the file reappears, updates resume and an `updated:<path>` event fires.
+- **File appears after boot** (e.g. a secret mounted post-start) — `getOptionalConfigFromFile` on a missing file installs a parent-directory watcher. When the file shows up, the originally returned default object is updated **in place** and `updated:<path>` fires. With no default, subscribe via `service.events` (`updated:<absolute path>`) or re-call the getter — a returned `undefined` cannot retroactively become the config.
+
+One limitation: the **parent directory must exist** at call time. If it doesn't, no watcher is installed (ancestor directories are not walked).
+
+#### !!! Important: Using Config Values by Reference
 
 To ensure your application automatically receives updated config values when files change, you **must store config objects by reference**, not by extracting primitive values:
 
@@ -496,6 +569,25 @@ When the file watcher detects changes, it updates the **same object instance** i
 - ✅ Process termination only on validation errors (required configs throw on any error)
 - ✅ **Event methods attached to default values** - consistent API even when files don't exist
 - ✅ No application restart needed - changes apply immediately when using object references
+
+## Migration to v1.2.0
+
+v1.2.0 ships several intentional behavior changes. Each item below shows the **before** (v1.1.x) behavior and **after** (v1.2.0) behavior.
+
+| Getter / area | Before (v1.1.x) | After (v1.2.0) |
+|---|---|---|
+| `getOptionalBooleanEnv` with `TRUE` / `1` / `yes` | silently returned `false` | **throws** (only `"true"` / `"false"` accepted) |
+| `getRequiredNumericEnv` / `getOptionalNumericEnv` with `"___"` or `"1__2"` | `"___"` → `0`, `"_1"` → 1 | **throws** (underscores only between digit groups) |
+| `getOptionalNumericEnv` with a present-but-invalid value | returned the default | **throws** |
+| Any `getRequired*` with `KEY=` (empty value) | accepted as a valid empty string | **throws** `"Variable 'KEY' is set but empty"` |
+| `getOptionalEnv(name, allowedValues[])` when `name` is unset | **threw** (treated unset as invalid) | returns `undefined` |
+| `getOptionalEnv` empty-string value | returned `""` (ignored default) | returns default (treated as unset) |
+| `getOptionalCron` with empty string | threw (invalid cron expression) | returns `undefined` |
+| `isTimePeriod(NaN)` / `isTimePeriod(-1)` | `true` | `false` |
+| Single-quoted `.env` values (e.g. `A='${B}'`) | `${B}` was expanded | stored literally, not expanded |
+| `$`-patterns in interpolated values (`pa$$w0rd`) | could corrupt to `pa$w0rd` | inserted verbatim |
+
+**New additions:** `EnvGetterModule.forRoot({ envFilePath, configBaseDir })`, new no-default `getOptionalTimePeriod` overloads, watcher support for absent-at-boot files and delete→recreate rotation.
 
 ## License
 

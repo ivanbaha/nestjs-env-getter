@@ -7,3 +7,5 @@ export type {
   Disposable,
   WithConfigEvents,
 } from "./config-events.type";
+export type { EnvGetterModuleOptions } from "./module-options.type";
+export { ENV_GETTER_OPTIONS } from "./module-options.type";

@@ -248,6 +248,7 @@ function parseCronField(field: string, min: number, max: number): number[] {
     const base = stepMatch[1] as string;
     const step = stepMatch[2] as string;
     const stepNum = parseInt(step, 10);
+    if (!Number.isInteger(stepNum) || stepNum < 1) return [];
     const baseValues = parseCronField(base, min, max);
     const result: number[] = [];
     for (let i = 0; i < baseValues.length; i += stepNum) {
@@ -263,6 +264,7 @@ function parseCronField(field: string, min: number, max: number): number[] {
     const end = rangeMatch[2] as string;
     const startNum = parseInt(start, 10);
     const endNum = parseInt(end, 10);
+    if (startNum < min || endNum > max || startNum > endNum) return [];
     const result: number[] = [];
     for (let i = startNum; i <= endNum; i++) {
       result.push(i);
@@ -282,7 +284,7 @@ function parseCronField(field: string, min: number, max: number): number[] {
 
   // Handle single numeric values
   const num = parseInt(field, 10);
-  return [num];
+  return isNaN(num) || num < min || num > max ? [] : [num];
 }
 
 /**
@@ -304,9 +306,11 @@ export class CronSchedule {
 
   /**
    * Creates a new CronSchedule instance.
-   * @param expression - The cron expression string (must be pre-validated).
+   * @param expression - The cron expression string.
+   * @throws {Error} If the expression is not a valid cron expression.
    */
   constructor(expression: string) {
+    if (!isValidCronExpression(expression)) throw new Error(`Invalid cron expression: '${expression}'`);
     this.expression = expression.trim();
     const fields = this.expression.split(/\s+/);
     this.isSixField = fields.length === 6;

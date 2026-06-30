@@ -25,12 +25,16 @@ export class AppConfig {
   readonly cdnUrl: URL;
   readonly sessionTtlMs: number;
   readonly workerIntervalSeconds: number;
+  // v1.2.0 no-default getOptionalTimePeriod overloads — `number | undefined`
+  readonly gracePeriodMs: number | undefined;
+  readonly gracePeriodSeconds: number | undefined;
 
   testConfig?: WithConfigEvents<TestConfig>;
   readonly optionalConfigFallback: WithConfigEvents<OptionalFeatureConfig>;
 
   readonly singleQuotedVal: string;
   readonly doubleQuotedVal: string;
+  readonly literalTemplate: string;
   readonly privateKey: string;
   readonly appName: string;
   readonly appTitle: string;
@@ -84,6 +88,9 @@ export class AppConfig {
     this.cdnUrl = this.envGetter.getOptionalURL('CDN_URL', new URL('https://cdn.fallback.example.com'));
     this.sessionTtlMs = this.envGetter.getRequiredTimePeriod('SESSION_TTL', 'ms');
     this.workerIntervalSeconds = this.envGetter.getOptionalTimePeriod('WORKER_INTERVAL', '30s', 's');
+    // v1.2.0 no-default overloads: return `undefined` when GRACE_PERIOD is unset/empty
+    this.gracePeriodMs = this.envGetter.getOptionalTimePeriod('GRACE_PERIOD'); // (name)
+    this.gracePeriodSeconds = this.envGetter.getOptionalTimePeriod('GRACE_PERIOD', 's'); // (name, resultIn)
 
     this.testConfig = this.envGetter.getOptionalConfigFromFile(
       options.testConfigFile,
@@ -105,6 +112,8 @@ export class AppConfig {
 
     this.singleQuotedVal = this.envGetter.getRequiredEnv('SINGLE_QUOTED_VAL');
     this.doubleQuotedVal = this.envGetter.getRequiredEnv('DOUBLE_QUOTED_VAL');
+    // v1.2.0: single-quoted values are raw literals — `${APP_NAME}` is NOT interpolated
+    this.literalTemplate = this.envGetter.getRequiredEnv('LITERAL_TEMPLATE');
     this.privateKey = this.envGetter.getRequiredEnv('PRIVATE_KEY');
     this.appName = this.envGetter.getRequiredEnv('APP_NAME');
     this.appTitle = this.envGetter.getRequiredEnv('APP_TITLE');
@@ -152,11 +161,14 @@ export class AppConfig {
           optionalBooleanFlag: this.optionalBooleanFlag,
           cdnUrl: this.cdnUrl.toString(),
           workerIntervalSeconds: this.workerIntervalSeconds,
+          gracePeriodMs: this.gracePeriodMs,
+          gracePeriodSeconds: this.gracePeriodSeconds,
         },
       },
       parserFeatures: {
         singleQuotedVal: this.singleQuotedVal,
         doubleQuotedVal: this.doubleQuotedVal,
+        literalTemplate: this.literalTemplate,
         appName: this.appName,
         appTitle: this.appTitle,
         baseUrl: this.baseUrl,

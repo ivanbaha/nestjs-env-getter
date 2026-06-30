@@ -201,6 +201,57 @@ RESULT=\${MY_VAR}`;
         const result = parseEnvString("RESULT=${UNDEFINED_VAR}", { systemEnv: {}, quiet: true });
         expect(result.variables.RESULT).toBe("");
       });
+
+      it("should insert values containing $-patterns verbatim (P3.1)", () => {
+        const content = `
+DB_PASS=pa$$w0rd
+DB_URL=postgres://user:\${DB_PASS}@host/db`;
+        const result = parseEnvString(content);
+        // String.replace would have corrupted $$ -> $; the function replacer must not
+        expect(result.variables.DB_URL).toBe("postgres://user:pa$$w0rd@host/db");
+      });
+
+      it("should survive all special replacement patterns ($$, $&, $`, $') (P3.1)", () => {
+        const content = 'SPECIAL="v$&w$`x$\'y$$z"\nRESULT=[${SPECIAL}]';
+        const result = parseEnvString(content);
+        expect(result.variables.RESULT).toBe("[v$&w$`x$'y$$z]");
+      });
+
+      it("should NOT expand variables in single-quoted values (P3.2)", () => {
+        const content = `
+B=real
+A='literal \${B}'`;
+        const result = parseEnvString(content);
+        expect(result.variables.A).toBe("literal ${B}");
+      });
+
+      it("should expand variables in double-quoted and unquoted values (P3.2)", () => {
+        const content = `
+B=real
+C="expanded \${B}"
+D=\${B}`;
+        const result = parseEnvString(content);
+        expect(result.variables.C).toBe("expanded real");
+        expect(result.variables.D).toBe("real");
+      });
+
+      it("should keep multiline single-quoted values literal (P3.2)", () => {
+        const content = `
+B=real
+A='line1 \${B}
+line2 \${B}'`;
+        const result = parseEnvString(content);
+        expect(result.variables.A).toBe("line1 ${B}\nline2 ${B}");
+      });
+
+      it("should still expand multiline double-quoted values (P3.2)", () => {
+        const content = `
+B=real
+A="line1 \${B}
+line2"`;
+        const result = parseEnvString(content);
+        expect(result.variables.A).toBe("line1 real\nline2");
+      });
     });
 
     describe("Whitespace and Comments", () => {

@@ -6,10 +6,10 @@ export type UsersTestDocument = UsersTest & Document;
 @Schema({ collection: 'users-test' })
 export class UsersTest {
   @Prop({ required: true })
-  name: string;
+  name!: string;
 
   @Prop({ required: true })
-  age: number;
+  age!: number;
 }
 
 export const UsersTestSchema = SchemaFactory.createForClass(UsersTest);

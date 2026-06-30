@@ -16,6 +16,14 @@ import { AppConfigOptionsService } from './app-config-options.service';
     AppConfigModule.forRootAsync({
       useClass: AppConfig,
       providers: [AppConfigOptionsService],
+      // v1.2.0 module options, forwarded to EnvGetterService:
+      // - envFilePath: which .env file(s) to load at startup (string | string[] | false to opt out)
+      // - configBaseDir: confine getRequired/getOptionalConfigFromFile resolution to this dir;
+      //   any path escaping it terminates the app (path-traversal guard)
+      envGetter: {
+        envFilePath: '.env',
+        configBaseDir: process.cwd(),
+      },
     }),
 
     // Use AppConfig to provide MongoDB connection string from config file

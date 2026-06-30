@@ -352,10 +352,10 @@ describe("CronSchedule", () => {
     });
 
     test("returns null when no match within iteration limit", () => {
-      // Create a schedule that will never match (Feb 31st)
-      const schedule = new CronSchedule("0 0 31 2 *");
-      const from = new Date("2024-01-01T00:00:00");
-      const next = schedule.getNextTime(from, 100); // Very small limit
+      // Use a rare but valid date (Feb 29 at 3:00 AM) with a tiny iteration limit
+      const schedule = new CronSchedule("0 3 29 2 *");
+      const from = new Date("2024-03-01T00:00:00"); // Next Feb 29 is ~11 months away
+      const next = schedule.getNextTime(from, 5); // Very small limit
 
       expect(next).toBeNull();
     });
@@ -445,10 +445,10 @@ describe("CronSchedule", () => {
     });
 
     test("returns null when no match within iteration limit", () => {
-      // Create a schedule that will never match (Feb 31st)
-      const schedule = new CronSchedule("0 0 31 2 *");
-      const from = new Date("2024-12-31T23:59:59");
-      const prev = schedule.getPrevTime(from, 100); // Very small limit
+      // Use a rare but valid date (Feb 29 at 3:00 AM) with a tiny iteration limit
+      const schedule = new CronSchedule("0 3 29 2 *");
+      const from = new Date("2024-03-15T00:00:00"); // Feb 29 2024 is ~15 days back
+      const prev = schedule.getPrevTime(from, 5); // Very small limit
 
       expect(prev).toBeNull();
     });
@@ -524,5 +524,39 @@ describe("CronSchedule", () => {
       expect(prev).not.toBeNull();
       expect(prev?.getMinutes()).toBe(0);
     });
+  });
+});
+
+describe("CronSchedule constructor validation (P1.1)", () => {
+  test("throws for zero step (was: infinite loop hanging the event loop)", () => {
+    expect(() => new CronSchedule("*/0 * * * *")).toThrow("Invalid cron expression: '*/0 * * * *'");
+  }, 2000); // tight timeout: a regression into the old infinite loop must fail fast, not hang CI
+
+  test("throws for a huge range (was: unbounded array allocation / OOM)", () => {
+    expect(() => new CronSchedule("1-2000000000 * * * *")).toThrow("Invalid cron expression: '1-2000000000 * * * *'");
+  }, 2000);
+
+  test("throws for malformed expressions", () => {
+    expect(() => new CronSchedule("")).toThrow(/Invalid cron expression/);
+    expect(() => new CronSchedule("a b c")).toThrow(/Invalid cron expression/);
+    expect(() => new CronSchedule("60 * * * *")).toThrow(/Invalid cron expression/);
+    expect(() => new CronSchedule("* * 32 * *")).toThrow(/Invalid cron expression/);
+  });
+
+  test("still constructs all valid expressions", () => {
+    expect(() => new CronSchedule("* * * * *")).not.toThrow();
+    expect(() => new CronSchedule("*/5 * * * *")).not.toThrow();
+    expect(() => new CronSchedule("0 0 * * 0")).not.toThrow();
+    expect(() => new CronSchedule("0,30 8-18 * * 1-5")).not.toThrow();
+    expect(() => new CronSchedule("30 0 12 * * *")).not.toThrow(); // 6-field
+  });
+
+  test("negative or fractional steps are rejected", () => {
+    expect(() => new CronSchedule("*/-1 * * * *")).toThrow(/Invalid cron expression/);
+    expect(() => new CronSchedule("*/1.5 * * * *")).toThrow(/Invalid cron expression/);
+  });
+
+  test("inverted ranges are rejected", () => {
+    expect(() => new CronSchedule("30-10 * * * *")).toThrow(/Invalid cron expression/);
   });
 });

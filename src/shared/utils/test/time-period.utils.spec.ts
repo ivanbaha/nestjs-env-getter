@@ -29,6 +29,14 @@ describe("isTimePeriod", () => {
     expect(isTimePeriod(null as any)).toBe(false);
     expect(isTimePeriod({} as any)).toBe(false);
   });
+
+  test("returns false for non-finite and negative numbers (P3.3)", () => {
+    expect(isTimePeriod(NaN)).toBe(false);
+    expect(isTimePeriod(Infinity)).toBe(false);
+    expect(isTimePeriod(-Infinity)).toBe(false);
+    expect(isTimePeriod(-5)).toBe(false);
+    expect(isTimePeriod(-0.1)).toBe(false);
+  });
 });
 
 describe("parseTimePeriod", () => {
@@ -52,5 +60,19 @@ describe("parseTimePeriod", () => {
     expect(parseTimePeriod("abc")).toBeNaN();
     expect(parseTimePeriod(" ")).toBeNaN();
     expect(parseTimePeriod(true as any)).toBeNaN();
+  });
+
+  test("rounds up to the nearest integer (Math.ceil, P3.3)", () => {
+    // 1500ms converted to seconds rounds UP to 2
+    expect(parseTimePeriod("1500", "s")).toBe(2);
+    expect(parseTimePeriod("1500 ms", "s")).toBe(2);
+    expect(parseTimePeriod("90s", "m")).toBe(2);
+  });
+
+  test("number input is milliseconds, converted to resultIn (P2.6)", () => {
+    expect(parseTimePeriod(5000, "s")).toBe(5);
+    expect(parseTimePeriod(1500, "s")).toBe(2); // ceil
+    expect(parseTimePeriod(120_000, "m")).toBe(2);
+    expect(parseTimePeriod(5000, "ms")).toBe(5000); // ms passthrough unchanged
   });
 });

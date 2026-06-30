@@ -142,7 +142,7 @@ function expandVariables(
       replacement = "";
     }
 
-    result = result.replace(fullMatch, replacement);
+    result = result.replace(fullMatch, () => replacement);
   }
 
   return { result };
@@ -151,6 +151,10 @@ function expandVariables(
 /**
  * Parses a single line from a .env file and extracts a key‑value pair.
  * Returns `null` for comments or empty lines.
+ * Quote semantics:
+ * - Single quotes → raw literal (no interpolation, no escape processing).
+ * - Double quotes → escape sequences + interpolation.
+ * - Unquoted → interpolation, `#` starts a comment.
  * @param line - The raw line text.
  * @param lineNumber - The line number in the file (1‑based).
  * @param buffer - Current multiline buffer state, if any.
@@ -159,12 +163,13 @@ function expandVariables(
 function parseLine(
   line: string,
   lineNumber: number,
-  buffer: { key: string; value: string; quoteChar: string; startLine: number } | null,
+  buffer: { key: string; value: string; quoteChar: string; startLine: number; singleQuoted: boolean } | null,
 ): {
   key?: string;
   value?: string;
+  singleQuoted?: boolean;
   isComplete: boolean;
-  buffer: { key: string; value: string; quoteChar: string; startLine: number } | null;
+  buffer: { key: string; value: string; quoteChar: string; startLine: number; singleQuoted: boolean } | null;
   error?: EnvParseError;
 } {
   // If we're in multiline mode, continue accumulating
@@ -174,7 +179,7 @@ function parseLine(
       if (closingIndex !== -1) {
         // Found closing single quote
         buffer.value += "\n" + line.substring(0, closingIndex);
-        return { key: buffer.key, value: buffer.value, isComplete: true, buffer: null };
+        return { key: buffer.key, value: buffer.value, singleQuoted: true, isComplete: true, buffer: null };
       }
     } else if (buffer.quoteChar === '"') {
       // Double-quoted multiline - scan for non-escaped quote
@@ -188,7 +193,13 @@ function parseLine(
         } else if (line[i] === '"') {
           // Found closing double quote
           buffer.value += "\n" + collected;
-          return { key: buffer.key, value: processEscapes(buffer.value), isComplete: true, buffer: null };
+          return {
+            key: buffer.key,
+            value: processEscapes(buffer.value),
+            singleQuoted: false,
+            isComplete: true,
+            buffer: null,
+          };
         } else {
           collected += line[i];
           i++;
@@ -250,19 +261,19 @@ function parseLine(
   const firstChar = rawValue.charAt(0);
 
   if (firstChar === "'") {
-    // Single-quoted value - raw literal
+    // Single-quoted value - raw literal, no interpolation
     const closingIndex = rawValue.indexOf("'", 1);
     if (closingIndex === -1) {
       // Check if it's multiline or unterminated
       return {
         isComplete: false,
-        buffer: { key, value: rawValue.substring(1), quoteChar: "'", startLine: lineNumber },
+        buffer: { key, value: rawValue.substring(1), quoteChar: "'", startLine: lineNumber, singleQuoted: true },
       };
     }
     const value = rawValue.substring(1, closingIndex);
-    return { key, value, isComplete: true, buffer: null };
+    return { key, value, singleQuoted: true, isComplete: true, buffer: null };
   } else if (firstChar === '"') {
-    // Double-quoted value - supports escapes
+    // Double-quoted value - supports escapes and interpolation
     // Find the closing quote, accounting for escaped quotes
     let i = 1;
     let value = "";
@@ -286,15 +297,15 @@ function parseLine(
       // Multiline double-quoted string
       return {
         isComplete: false,
-        buffer: { key, value, quoteChar: '"', startLine: lineNumber },
+        buffer: { key, value, quoteChar: '"', startLine: lineNumber, singleQuoted: false },
       };
     }
 
     // Process escape sequences
     const processedValue = processEscapes(value);
-    return { key, value: processedValue, isComplete: true, buffer: null };
+    return { key, value: processedValue, singleQuoted: false, isComplete: true, buffer: null };
   } else {
-    // Unquoted value - trim whitespace and stop at comment
+    // Unquoted value - trim whitespace, stop at comment, interpolation applies
     rawValue = rawValue.trim();
 
     // Find inline comment (# not inside quotes)
@@ -303,7 +314,7 @@ function parseLine(
       rawValue = rawValue.substring(0, commentIndex).trimEnd();
     }
 
-    return { key, value: rawValue, isComplete: true, buffer: null };
+    return { key, value: rawValue, singleQuoted: false, isComplete: true, buffer: null };
   }
 }
 
@@ -322,9 +333,10 @@ export function parseEnvString(content: string, options: EnvParseOptions = {}): 
   const lines = normalizedContent.split("\n");
 
   const variables: Record<string, string> = {};
+  const singleQuotedKeys = new Set<string>();
   const errors: EnvParseError[] = [];
 
-  let buffer: { key: string; value: string; quoteChar: string; startLine: number } | null = null;
+  let buffer: { key: string; value: string; quoteChar: string; startLine: number; singleQuoted: boolean } | null = null;
 
   for (let i = 0; i < lines.length; i++) {
     const lineNumber = i + 1;
@@ -342,6 +354,7 @@ export function parseEnvString(content: string, options: EnvParseOptions = {}): 
 
     if (result.isComplete && result.key !== undefined) {
       variables[result.key] = result.value ?? "";
+      if (result.singleQuoted) singleQuotedKeys.add(result.key);
     }
 
     buffer = result.buffer;
@@ -363,9 +376,14 @@ export function parseEnvString(content: string, options: EnvParseOptions = {}): 
     }
   }
 
-  // Second pass: variable interpolation
+  // Second pass: variable interpolation — skip single-quoted values (raw literals)
   const expandedVariables: Record<string, string> = {};
   for (const [key, value] of Object.entries(variables)) {
+    if (singleQuotedKeys.has(key)) {
+      expandedVariables[key] = value;
+      continue;
+    }
+
     const { result, circularError } = expandVariables(value, variables, systemEnv, new Set([key]), quiet);
 
     if (circularError) {

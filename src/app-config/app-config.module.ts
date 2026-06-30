@@ -9,6 +9,7 @@ import {
 } from "@nestjs/common";
 import { EnvGetterService } from "../env-getter/env-getter.service";
 import { ClassConstructor } from "../shared/types/class-constructor.type";
+import { type EnvGetterModuleOptions, ENV_GETTER_OPTIONS } from "../env-getter/types";
 
 /**
  * Injection token used by `AppConfigModule.forRootAsync` with `useFactory`.
@@ -22,6 +23,8 @@ export interface AppConfigModuleOptions {
   inject?: (InjectionToken | OptionalFactoryDependency)[];
   imports?: ModuleMetadata["imports"];
   providers?: Provider[];
+  /** Pass-through to `EnvGetterModuleOptions` (envFilePath, configBaseDir). */
+  envGetter?: EnvGetterModuleOptions;
 }
 
 @Global()
@@ -31,20 +34,27 @@ export class AppConfigModule {
     useClass: ClassConstructor;
     imports?: ModuleMetadata["imports"];
     providers?: Provider[];
+    envGetter?: EnvGetterModuleOptions;
   }): DynamicModule {
     const provider: Provider = { provide: options.useClass, useClass: options.useClass };
     const additionalProviders = options.providers || [];
+    const envGetterProviders: Provider[] = options.envGetter
+      ? [{ provide: ENV_GETTER_OPTIONS, useValue: options.envGetter }]
+      : [];
 
     return {
       module: AppConfigModule,
       imports: options.imports || [],
-      providers: [EnvGetterService, provider, ...additionalProviders],
+      providers: [...envGetterProviders, EnvGetterService, provider, ...additionalProviders],
       exports: [EnvGetterService, provider, ...additionalProviders],
     };
   }
 
   static forRootAsync(options: AppConfigModuleOptions): DynamicModule {
     const additionalProviders = options.providers || [];
+    const envGetterProviders: Provider[] = options.envGetter
+      ? [{ provide: ENV_GETTER_OPTIONS, useValue: options.envGetter }]
+      : [];
 
     if (options.useFactory) {
       const provider: Provider = {
@@ -56,7 +66,7 @@ export class AppConfigModule {
       return {
         module: AppConfigModule,
         imports: options.imports || [],
-        providers: [EnvGetterService, provider, ...additionalProviders],
+        providers: [...envGetterProviders, EnvGetterService, provider, ...additionalProviders],
         exports: [EnvGetterService, provider, ...additionalProviders],
       };
     }
@@ -68,7 +78,7 @@ export class AppConfigModule {
       return {
         module: AppConfigModule,
         imports: options.imports || [],
-        providers: [EnvGetterService, provider, ...additionalProviders],
+        providers: [...envGetterProviders, EnvGetterService, provider, ...additionalProviders],
         exports: [EnvGetterService, provider, ...additionalProviders],
       };
     }

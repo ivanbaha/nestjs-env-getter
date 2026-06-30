@@ -167,14 +167,18 @@ describe("Env Getter Service", () => {
       expect(service["stopProcess"]).toHaveBeenCalledWith("Missing 'MISSING_ENV' environment variable");
     });
 
-    it("should stop process with an error if JSON parsing fails", () => {
+    it("should stop process with an error if JSON parsing fails (without leaking input fragments)", () => {
       process.env.TEST_ENV_getRequiredObject = "invalid-json";
 
       service.getRequiredObject("TEST_ENV_getRequiredObject");
 
       expect(service["stopProcess"]).toHaveBeenCalledWith(
-        "Cannot parse object from variable 'TEST_ENV_getRequiredObject'. Error: Unexpected token 'i', \"invalid-json\" is not valid JSON",
+        expect.stringContaining("Cannot parse object from variable 'TEST_ENV_getRequiredObject'. Error: Invalid JSON"),
       );
+      // Must NOT include the raw input fragment
+      const stopSpy = service["stopProcess"] as unknown as jest.SpyInstance;
+      const callArg = stopSpy.mock.calls.at(-1)?.[0] as string;
+      expect(callArg).not.toContain("invalid-json");
     });
 
     it("should stop process with an error if the provided class validation fails", () => {
@@ -206,9 +210,7 @@ describe("Env Getter Service", () => {
 
       service.getRequiredArray<string>("TEST_ARRAY");
 
-      expect(service["stopProcess"]).toHaveBeenCalledWith(
-        "Cannot parse an array from variable 'TEST_ARRAY'. Error: \"undefined\" is not valid JSON",
-      );
+      expect(service["stopProcess"]).toHaveBeenCalledWith("Missing 'TEST_ARRAY' environment variable");
     });
 
     it("should throw an error if the environment variable is not a valid JSON array", () => {
@@ -243,14 +245,11 @@ describe("Env Getter Service", () => {
 
     it("should throw an error if the validation function returns an invalid type", () => {
       process.env.TEST_ARRAY = "[1, 2, 3]";
-      jest.spyOn(global, "Error").mockImplementationOnce((message) => {
-        return { message, stack: "mocked stack trace" } as any;
-      });
 
       service.getRequiredArray<number>("TEST_ARRAY", () => ({}) as any);
 
       expect(service["stopProcess"]).toHaveBeenCalledWith(
-        `The validation func of EnvGetterService.getRequiredArray('TEST_ARRAY') must return either boolean or string\nTrace mocked stack trace`,
+        `The validation func of EnvGetterService.getRequiredArray('TEST_ARRAY') must return a boolean or non-empty string.`,
       );
     });
   });
@@ -427,7 +426,8 @@ describe("Env Getter Service", () => {
           }
         }
 
-        service.getOptionalConfigFromFile("temp-valid.json", TestConfig);
+        // stopProcess is mocked to return undefined; the code then re-throws, so we expect a throw
+        expect(() => service.getOptionalConfigFromFile("temp-valid.json", TestConfig)).toThrow();
         expect(service["stopProcess"]).toHaveBeenCalledWith(expect.stringContaining("Validation failed"));
       } finally {
         // Clean up
@@ -646,5 +646,334 @@ describe("Env Getter Service", () => {
         done();
       }, 500);
     }, 2000);
+  });
+
+  describe("set-but-empty environment variables (P2.4/M9)", () => {
+    afterEach(() => {
+      delete process.env.TEST_EMPTY_ENV;
+    });
+
+    it("getRequiredEnv should stop process with a distinct 'set but empty' message", () => {
+      process.env.TEST_EMPTY_ENV = "";
+
+      service.getRequiredEnv("TEST_EMPTY_ENV");
+
+      expect(service["stopProcess"]).toHaveBeenCalledWith("Variable 'TEST_EMPTY_ENV' is set but empty");
+    });
+
+    it("the empty check should flow through derived required getters", () => {
+      process.env.TEST_EMPTY_ENV = "";
+
+      service.getRequiredNumericEnv("TEST_EMPTY_ENV");
+
+      expect(service["stopProcess"]).toHaveBeenCalledWith("Variable 'TEST_EMPTY_ENV' is set but empty");
+    });
+
+    it("isEnvSet should keep pure-existence semantics for empty values", () => {
+      process.env.TEST_EMPTY_ENV = "";
+
+      expect(service.isEnvSet("TEST_EMPTY_ENV")).toBe(true);
+    });
+  });
+
+  describe("getOptionalEnv — empty values and allowedValues (P2.1/M9)", () => {
+    afterEach(() => {
+      delete process.env.TEST_OPT_ALLOWED;
+    });
+
+    it("should return undefined when unset with allowedValues (no validation)", () => {
+      delete process.env.TEST_OPT_ALLOWED;
+
+      const result = service.getOptionalEnv("TEST_OPT_ALLOWED", ["a", "b"]);
+
+      expect(result).toBeUndefined();
+      expect(service["stopProcess"]).not.toHaveBeenCalled();
+    });
+
+    it("should return undefined when empty with allowedValues (no validation)", () => {
+      process.env.TEST_OPT_ALLOWED = "";
+
+      const result = service.getOptionalEnv("TEST_OPT_ALLOWED", ["a", "b"]);
+
+      expect(result).toBeUndefined();
+      expect(service["stopProcess"]).not.toHaveBeenCalled();
+    });
+
+    it("should treat an empty value as unset and return the default", () => {
+      process.env.TEST_OPT_ALLOWED = "";
+
+      expect(service.getOptionalEnv("TEST_OPT_ALLOWED", "fallback")).toBe("fallback");
+    });
+  });
+
+  describe("getRequiredBooleanEnv", () => {
+    afterEach(() => {
+      delete process.env.TEST_BOOL_ENV;
+    });
+
+    it("should parse 'true' and 'false'", () => {
+      process.env.TEST_BOOL_ENV = "true";
+      expect(service.getRequiredBooleanEnv("TEST_BOOL_ENV")).toBe(true);
+
+      process.env.TEST_BOOL_ENV = "false";
+      expect(service.getRequiredBooleanEnv("TEST_BOOL_ENV")).toBe(false);
+    });
+
+    it("should stop process for case variants and non-boolean values", () => {
+      for (const bad of ["TRUE", "False", "1", "yes"]) {
+        (service["stopProcess"] as unknown as jest.SpyInstance).mockClear();
+        process.env.TEST_BOOL_ENV = bad;
+
+        service.getRequiredBooleanEnv("TEST_BOOL_ENV");
+
+        expect(service["stopProcess"]).toHaveBeenCalledWith("Variable 'TEST_BOOL_ENV' is not of boolean type.");
+      }
+    });
+  });
+
+  describe("getOptionalBooleanEnv — strict validation (P2.2)", () => {
+    afterEach(() => {
+      delete process.env.TEST_OPT_BOOL;
+    });
+
+    it("should return the default when unset or empty", () => {
+      delete process.env.TEST_OPT_BOOL;
+      expect(service.getOptionalBooleanEnv("TEST_OPT_BOOL", true)).toBe(true);
+      expect(service.getOptionalBooleanEnv("TEST_OPT_BOOL")).toBeUndefined();
+
+      process.env.TEST_OPT_BOOL = "";
+      expect(service.getOptionalBooleanEnv("TEST_OPT_BOOL", true)).toBe(true);
+    });
+
+    it("should parse exact 'true'/'false'", () => {
+      process.env.TEST_OPT_BOOL = "true";
+      expect(service.getOptionalBooleanEnv("TEST_OPT_BOOL", false)).toBe(true);
+
+      process.env.TEST_OPT_BOOL = "false";
+      expect(service.getOptionalBooleanEnv("TEST_OPT_BOOL", true)).toBe(false);
+    });
+
+    it("should stop process for anything else instead of silently returning false", () => {
+      for (const bad of ["TRUE", "1", "yes", "on"]) {
+        (service["stopProcess"] as unknown as jest.SpyInstance).mockClear();
+        process.env.TEST_OPT_BOOL = bad;
+
+        service.getOptionalBooleanEnv("TEST_OPT_BOOL", true);
+
+        expect(service["stopProcess"]).toHaveBeenCalledWith(
+          `Variable 'TEST_OPT_BOOL' is not of boolean type. Expected 'true' or 'false', received '${bad}'.`,
+        );
+      }
+    });
+  });
+
+  describe("numeric getters — strict integer validation (P2.3)", () => {
+    afterEach(() => {
+      delete process.env.TEST_NUM_ENV;
+    });
+
+    it("should parse plain integers and underscore-grouped integers", () => {
+      process.env.TEST_NUM_ENV = "42";
+      expect(service.getRequiredNumericEnv("TEST_NUM_ENV")).toBe(42);
+
+      process.env.TEST_NUM_ENV = "1_000_000";
+      expect(service.getRequiredNumericEnv("TEST_NUM_ENV")).toBe(1_000_000);
+    });
+
+    it("should stop process for malformed numeric strings (required)", () => {
+      for (const bad of ["___", "_1", "1__2", "12_", "1.5", "1e3", "abc"]) {
+        (service["stopProcess"] as unknown as jest.SpyInstance).mockClear();
+        process.env.TEST_NUM_ENV = bad;
+
+        service.getRequiredNumericEnv("TEST_NUM_ENV");
+
+        expect(service["stopProcess"]).toHaveBeenCalledWith("Variable 'TEST_NUM_ENV' is not of number type.");
+      }
+    });
+
+    it("should stop process for values beyond the safe integer range", () => {
+      process.env.TEST_NUM_ENV = "9007199254740993"; // Number.MAX_SAFE_INTEGER + 2
+
+      service.getRequiredNumericEnv("TEST_NUM_ENV");
+
+      expect(service["stopProcess"]).toHaveBeenCalledWith("Variable 'TEST_NUM_ENV' exceeds the safe integer range.");
+    });
+
+    it("getOptionalNumericEnv should return default when unset or empty", () => {
+      delete process.env.TEST_NUM_ENV;
+      expect(service.getOptionalNumericEnv("TEST_NUM_ENV", 7)).toBe(7);
+      expect(service.getOptionalNumericEnv("TEST_NUM_ENV")).toBeUndefined();
+
+      process.env.TEST_NUM_ENV = "";
+      expect(service.getOptionalNumericEnv("TEST_NUM_ENV", 7)).toBe(7);
+    });
+
+    it("getOptionalNumericEnv should stop process for present-but-invalid values (not return default)", () => {
+      process.env.TEST_NUM_ENV = "not-a-number";
+
+      service.getOptionalNumericEnv("TEST_NUM_ENV", 7);
+
+      expect(service["stopProcess"]).toHaveBeenCalledWith("Variable 'TEST_NUM_ENV' is not of number type.");
+    });
+  });
+
+  describe("URL getters (P2.5 matrix)", () => {
+    afterEach(() => {
+      delete process.env.TEST_URL_ENV;
+    });
+
+    it("getRequiredURL should parse valid URLs and reject invalid ones", () => {
+      process.env.TEST_URL_ENV = "https://example.com/path";
+      expect(service.getRequiredURL("TEST_URL_ENV").hostname).toBe("example.com");
+
+      process.env.TEST_URL_ENV = "not a url";
+      service.getRequiredURL("TEST_URL_ENV");
+      expect(service["stopProcess"]).toHaveBeenCalledWith(expect.stringContaining("must be a valid URL"));
+    });
+
+    it("getOptionalURL: unset/empty → default; valid → URL; invalid → stop process", () => {
+      const fallback = new URL("https://fallback.example.com");
+
+      delete process.env.TEST_URL_ENV;
+      expect(service.getOptionalURL("TEST_URL_ENV", fallback)).toBe(fallback);
+      expect(service.getOptionalURL("TEST_URL_ENV")).toBeUndefined();
+
+      process.env.TEST_URL_ENV = "";
+      expect(service.getOptionalURL("TEST_URL_ENV", fallback)).toBe(fallback);
+
+      process.env.TEST_URL_ENV = "https://set.example.com";
+      expect(service.getOptionalURL("TEST_URL_ENV", fallback)?.hostname).toBe("set.example.com");
+
+      process.env.TEST_URL_ENV = "::invalid::";
+      service.getOptionalURL("TEST_URL_ENV", fallback);
+      expect(service["stopProcess"]).toHaveBeenCalledWith(expect.stringContaining("must be a valid URL"));
+    });
+  });
+
+  describe("time period getters (P2.6)", () => {
+    afterEach(() => {
+      delete process.env.TEST_TIME_ENV;
+    });
+
+    it("getRequiredTimePeriod should parse and convert (with Math.ceil rounding)", () => {
+      process.env.TEST_TIME_ENV = "30s";
+      expect(service.getRequiredTimePeriod("TEST_TIME_ENV")).toBe(30_000);
+      expect(service.getRequiredTimePeriod("TEST_TIME_ENV", "s")).toBe(30);
+
+      process.env.TEST_TIME_ENV = "1500ms";
+      expect(service.getRequiredTimePeriod("TEST_TIME_ENV", "s")).toBe(2); // rounded up
+    });
+
+    it("(name) overload: unset/empty → undefined", () => {
+      delete process.env.TEST_TIME_ENV;
+      expect(service.getOptionalTimePeriod("TEST_TIME_ENV")).toBeUndefined();
+
+      process.env.TEST_TIME_ENV = "";
+      expect(service.getOptionalTimePeriod("TEST_TIME_ENV")).toBeUndefined();
+    });
+
+    it("(name, resultIn) overload: unset → undefined; set → converted", () => {
+      delete process.env.TEST_TIME_ENV;
+      expect(service.getOptionalTimePeriod("TEST_TIME_ENV", "s")).toBeUndefined();
+
+      process.env.TEST_TIME_ENV = "2m";
+      expect(service.getOptionalTimePeriod("TEST_TIME_ENV", "s")).toBe(120);
+    });
+
+    it("(name, defaultValue, resultIn?) overload: unset → parsed default", () => {
+      delete process.env.TEST_TIME_ENV;
+      expect(service.getOptionalTimePeriod("TEST_TIME_ENV", "30s")).toBe(30_000);
+      expect(service.getOptionalTimePeriod("TEST_TIME_ENV", "30s", "s")).toBe(30);
+      // number default = milliseconds, converted to resultIn
+      expect(service.getOptionalTimePeriod("TEST_TIME_ENV", 5000, "s")).toBe(5);
+      expect(service.getOptionalTimePeriod("TEST_TIME_ENV", 5000)).toBe(5000);
+    });
+
+    it("env value wins over the default", () => {
+      process.env.TEST_TIME_ENV = "1m";
+      expect(service.getOptionalTimePeriod("TEST_TIME_ENV", "30s", "s")).toBe(60);
+    });
+
+    it("set-but-invalid values stop the process for all forms", () => {
+      process.env.TEST_TIME_ENV = "soon";
+
+      service.getOptionalTimePeriod("TEST_TIME_ENV");
+      expect(service["stopProcess"]).toHaveBeenCalledWith(expect.stringContaining("is not in the acceptable format"));
+
+      (service["stopProcess"] as unknown as jest.SpyInstance).mockClear();
+      service.getOptionalTimePeriod("TEST_TIME_ENV", "30s");
+      expect(service["stopProcess"]).toHaveBeenCalledWith(expect.stringContaining("is not in the acceptable format"));
+    });
+
+    it("invalid default values stop the process", () => {
+      delete process.env.TEST_TIME_ENV;
+
+      service.getOptionalTimePeriod("TEST_TIME_ENV", "nope" as string);
+
+      expect(service["stopProcess"]).toHaveBeenCalledWith(
+        expect.stringContaining("The default value for the environment variable"),
+      );
+    });
+  });
+
+  describe("getOptionalCron — empty value (P2.5/M9)", () => {
+    afterEach(() => {
+      delete process.env.TEST_CRON_EMPTY;
+    });
+
+    it("should return undefined for an empty value instead of throwing", () => {
+      process.env.TEST_CRON_EMPTY = "";
+
+      expect(service.getOptionalCron("TEST_CRON_EMPTY")).toBeUndefined();
+      expect(service["stopProcess"]).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("getRequiredArray — sanitization and error hygiene (P1.4/P1.2)", () => {
+    afterEach(() => {
+      delete process.env.TEST_ARRAY_SAN;
+    });
+
+    it("should strip __proto__ from array elements (prototype pollution defense)", () => {
+      process.env.TEST_ARRAY_SAN = '[{"__proto__":{"isAdmin":true}},{"name":"ok"}]';
+
+      const result = service.getRequiredArray<Record<string, unknown>>("TEST_ARRAY_SAN");
+
+      expect(({} as Record<string, unknown>).isAdmin).toBeUndefined(); // Object.prototype untouched
+      expect(Object.prototype.hasOwnProperty.call(result[0], "__proto__")).toBe(false);
+      expect(result[1]).toEqual({ name: "ok" });
+    });
+
+    it("should not leak the raw input fragment on JSON parse errors", () => {
+      process.env.TEST_ARRAY_SAN = '["SuperSecretValue123", oops]';
+
+      service.getRequiredArray("TEST_ARRAY_SAN");
+
+      // stopProcess is mocked (does not throw), so the first call is the JSON-parse one
+      const stopSpy = service["stopProcess"] as unknown as jest.SpyInstance;
+      const callArg = stopSpy.mock.calls[0]?.[0] as string;
+      expect(callArg).toContain("Invalid JSON");
+      expect(callArg).not.toContain("SuperSecretValue123");
+    });
+  });
+
+  describe("events emitter (P4.2)", () => {
+    it("should have no listener limit (setMaxListeners(0))", () => {
+      expect(service.events.getMaxListeners()).toBe(0);
+    });
+
+    it("should accept more than 10 subscriptions without warnings", () => {
+      const warnings: Error[] = [];
+      const onWarning = (warning: Error) => warnings.push(warning);
+      process.on("warning", onWarning);
+
+      for (let i = 0; i < 15; i++) {
+        service.events.on("updated:/some/path.json", () => undefined);
+      }
+
+      process.removeListener("warning", onWarning);
+      expect(service.events.listenerCount("updated:/some/path.json")).toBe(15);
+      expect(warnings.filter((w) => w.name === "MaxListenersExceededWarning")).toHaveLength(0);
+    });
   });
 });
