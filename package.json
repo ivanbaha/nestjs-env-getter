@@ -39,9 +39,11 @@
     },
     "resolutions": {
         "**/@angular-devkit/core/ajv": "^8.18.0",
-        "**/@angular-devkit/core/picomatch": "^4.0.4",
+        "**/@angular-devkit/core/picomatch": "^4.0.5",
         "@babel/core": "7.29.7",
-        "js-yaml": "4.2.0"
+        "js-yaml": "4.3.1",
+        "brace-expansion": "5.0.9",
+        "fast-uri": "3.1.5"
     },
     "peerDependencies": {
         "@nestjs/common": ">=9"
@@ -49,23 +51,23 @@
     "dependencies": {},
     "devDependencies": {
         "@eslint/js": "10.0.1",
-        "@nestjs/cli": "11.0.23",
-        "@nestjs/common": "11.1.27",
-        "@nestjs/core": "11.1.27",
-        "@nestjs/testing": "11.1.27",
+        "@nestjs/cli": "11.0.24",
+        "@nestjs/common": "11.2.1",
+        "@nestjs/core": "11.2.1",
+        "@nestjs/testing": "11.2.1",
         "@types/jest": "30.0.0",
-        "@types/node": "26.0.1",
-        "eslint": "10.5.0",
+        "@types/node": "26.2.0",
+        "eslint": "10.8.1",
         "eslint-config-prettier": "10.1.8",
-        "eslint-plugin-jsdoc": "63.0.8",
+        "eslint-plugin-jsdoc": "64.2.0",
         "eslint-plugin-prettier": "5.5.6",
-        "globals": "17.7.0",
+        "globals": "17.11.0",
         "jest": "30.4.2",
-        "prettier": "3.8.4",
+        "prettier": "3.9.6",
         "reflect-metadata": "0.2.2",
         "rxjs": "7.8.2",
-        "ts-jest": "29.4.11",
+        "ts-jest": "29.4.12",
         "typescript": "6.0.3",
-        "typescript-eslint": "8.62.0"
+        "typescript-eslint": "8.67.0"
     }
 }
