@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Security
 
 - **Dependency audit (dev and example dependencies only — the published package still has zero runtime dependencies):** Upgraded NestJS to `11.2.7` (root devDependencies and the example app), which brings `multer` `2.4.0`. Re-pinned vulnerable transitive packages to patched versions via `resolutions`: `brace-expansion` `5.0.12`, `js-yaml` `4.3.2`, `browserslist` `4.29.3`, `baseline-browser-mapping` `2.11.29`, `handlebars` `4.7.10`, plus `qs` `6.16.1` and `proxy-addr` `2.0.8` in the example. One advisory remains in both audits: `braces` (GHSA-vfj7-8cjw-p6xm, via `jest` → `micromatch`) has no patched release; it only processes the project's own test globs.
+- **`fast-uri` removed from the dependency tree:** nothing depends on `fast-uri` since ESLint was removed, but a leftover `resolutions` pin (`3.1.7`) kept it in both lockfiles, where it was flagged for the host case-folding check-evasion advisory (affected `>=3.0.0 <3.1.8`). The dead pin is gone, so the package no longer appears in either lockfile.
 
 ### Behavior changes
 
@@ -46,6 +47,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Template & CLI (`nestjs-env-getter init`) (AUTH-2):** Updated `app.config.ts.example` to extend `EnvConfig` and updated the CLI module insertion to `AppConfigModule.forRoot(AppConfig)`.
 - **Example application overhaul (EX-1 – EX-7):** Removed MongoDB/Docker dependency in favor of `DatabaseConnectionService` (`/db/status`), migrated `AppConfig` and `TasksConfig` to `EnvConfig` and `forFeature`, eliminated raw `process.env` reads, and added unit and e2e test suites.
 - **Toolchain:** Bumped TypeScript to v7 (`7.0.2`) and removed ESLint.
+- **CI:** All GitHub Actions jobs run on Node 26 (was 22), and every branch push and pull request now also runs the build (`yarn build`) next to typecheck and tests. Release builds still upload `dist` for the publish job; branch builds skip the upload. `@types/node` updated to `26.6.5`.
 - **Exceptions thrown by `updated` listeners** are logged through Nest's `Logger` instead of being reported as a failed re-read; they no longer emit an `error` event or trigger `breakOnError` (the new config has already been applied at that point).
 
 ### Fixed
