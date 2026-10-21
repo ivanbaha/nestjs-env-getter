@@ -48,6 +48,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Example application overhaul (EX-1 – EX-7):** Removed MongoDB/Docker dependency in favor of `DatabaseConnectionService` (`/db/status`), migrated `AppConfig` and `TasksConfig` to `EnvConfig` and `forFeature`, eliminated raw `process.env` reads, and added unit and e2e test suites.
 - **Toolchain:** Bumped TypeScript to v7 (`7.0.2`) and removed ESLint.
 - **CI:** All GitHub Actions jobs run on Node 26 (was 22), and every branch push and pull request now also runs the build (`yarn build`) next to typecheck and tests. Release builds still upload `dist` for the publish job; branch builds skip the upload. `@types/node` updated to `26.6.5`.
+- **Publishing:** Releases publish to npm through trusted publishing (OIDC) instead of a stored npm token; the `NPM_REGISTRY_PAT` secret is no longer used. `package.json` `repository.url` and `bin` are in npm's normalized form.
 - **Exceptions thrown by `updated` listeners** are logged through Nest's `Logger` instead of being reported as a failed re-read; they no longer emit an `error` event or trigger `breakOnError` (the new config has already been applied at that point).
 
 ### Fixed

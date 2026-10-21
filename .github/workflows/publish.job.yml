@@ -1,9 +1,4 @@
-on:
-  workflow_call:
-    secrets:
-      NPM_REGISTRY_PAT:
-        description: "NPM Registry Personal Access Token to publish packages"
-        required: true
+on: workflow_call
 permissions:
   contents: write
   id-token: write # required for provenance support
@@ -29,8 +24,17 @@ jobs:
           name: dist-${{ github.sha }}
           path: dist
 
+      # npm's OIDC exchange fails silently and only surfaces later as an auth error,
+      # so a missing `id-token: write` is reported here instead.
+      - name: Check an OIDC token can be minted
+        run: |
+          if [ -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ]; then
+            echo "::error::No OIDC token endpoint in this job — it is missing 'id-token: write'."
+            exit 1
+          fi
+
+      # No npm token: npm trusted publishing (OIDC, npm >= 11.5.1). This runs as a reusable
+      # workflow, and npm validates the *calling* workflow, so the trusted publisher on
+      # npmjs.com is registered for release.yml, not this file.
       - name: Publish package to npm
         run: npm publish --provenance --access public
-        env:
-          # TODO: migrate to npm Trusted Publishing (OIDC) once npm resolves their issue; id-token: write is already present
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_REGISTRY_PAT }}
