@@ -1,18 +1,19 @@
-import { loadEnvFile, loadEnvFiles } from "../shared/utils";
 import { EventEmitter } from "events";
 import { existsSync, readFileSync, watch } from "fs";
 import { join, isAbsolute, resolve, sep, dirname, basename } from "path";
 
-import { Injectable, OnModuleDestroy, Optional, Inject } from "@nestjs/common";
+import { Injectable, OnModuleDestroy, Optional, Inject, Logger } from "@nestjs/common";
 
 import {
   type ClassConstructor,
+  EnvValidationError,
   isTimePeriod,
   parseTimePeriod,
   TimeMarker,
   isValidCronExpression,
   CronSchedule,
 } from "../shared";
+import { loadEnvFromOptions } from "./load-env-from-options";
 import {
   type ArrayValidatorType,
   type ConfigErrorEvent,
@@ -20,9 +21,25 @@ import {
   type Disposable,
   type EnvGetterModuleOptions,
   type FileWatcherOptions,
+  type ListOptions,
   type WithConfigEvents,
   ENV_GETTER_OPTIONS,
 } from "./types";
+
+type ArrayGetterName = "getRequiredArray" | "getOptionalArray";
+
+/**
+ * Checks whether a value is a Promise-like object (thenable).
+ * @param value - The value to inspect.
+ * @returns `true` if `value` has a callable `then` method.
+ */
+function isThenable(value: unknown): boolean {
+  return (
+    value !== null &&
+    (typeof value === "object" || typeof value === "function") &&
+    typeof (value as { then?: unknown }).then === "function"
+  );
+}
 
 @Injectable()
 export class EnvGetterService implements OnModuleDestroy {
@@ -73,26 +90,32 @@ export class EnvGetterService implements OnModuleDestroy {
     }
     return value;
   }
+
   private readonly configsStorage: Record<string, unknown> = Object.create(null);
   private readonly fileWatchers = new Map<string, ReturnType<typeof watch>>();
   private readonly pendingWatchers = new Map<string, ReturnType<typeof watch>>();
+  private readonly logger = new Logger(EnvGetterService.name);
+  private readonly source: Record<string, string | undefined>;
+  private collector: string[] | null = null;
+  private collectorCause: unknown = undefined;
+  private guardDepth = 0;
 
   /**
    * Event emitter for config file change events.
-   * Emits 'updated' and 'error' events globally for all config files.
+   * Emits per-file `'updated:<filePath>'` (`ConfigUpdatedEvent`) and `'error:<filePath>'` (`ConfigErrorEvent`)
+   * events, as well as global `'updated'` (`ConfigUpdatedEvent`) and `'error'` (`ConfigErrorEvent`) events
+   * across all watched config files.
    */
   readonly events: EventEmitter = new EventEmitter();
 
+  /**
+   * Creates a new `EnvGetterService` instance.
+   * @param options - Optional module configuration options.
+   */
   constructor(@Optional() @Inject(ENV_GETTER_OPTIONS) private readonly options?: EnvGetterModuleOptions) {
     this.events.setMaxListeners(0);
-    const envFilePath = options?.envFilePath;
-    if (envFilePath === false) {
-      // Opt-out: do not load any .env file
-    } else if (Array.isArray(envFilePath)) {
-      loadEnvFiles(envFilePath, { quiet: true });
-    } else {
-      loadEnvFile(envFilePath ?? ".env", { quiet: true });
-    }
+    this.source = options?.env ?? process.env;
+    loadEnvFromOptions(options);
   }
 
   /**
@@ -108,6 +131,71 @@ export class EnvGetterService implements OnModuleDestroy {
   }
 
   /**
+   * Runs a synchronous callback while collecting all validation errors from public getters.
+   * When one or more getters fail, throws a single `EnvValidationError` containing all recorded messages.
+   * Note: values returned by failing getters inside `build` are `undefined` placeholders; the scope always throws at the end.
+   * @template T - The return type of the callback.
+   * @param build - Synchronous callback that invokes one or more getters.
+   * @param scope - Optional scope name (e.g. Config class name) included in multi-error messages.
+   * @returns The value returned by `build` when no validation errors occurred.
+   * @throws {EnvValidationError} If one or more getters failed validation during `build`.
+   * @throws {TypeError} If `build` returns a Promise/thenable.
+   */
+  collectErrors<T>(build: () => T, scope?: string): T {
+    const isOutermost = this.collector === null;
+    if (isOutermost) {
+      this.collector = [];
+      this.collectorCause = undefined;
+    }
+
+    try {
+      let result: T;
+      try {
+        result = build();
+      } catch (err: unknown) {
+        if (!isOutermost) {
+          if ((this.collector?.length ?? 0) > 0) {
+            if (this.collectorCause === undefined) {
+              this.collectorCause = err;
+            }
+            return undefined as unknown as T;
+          }
+          throw err;
+        }
+
+        const recorded = this.collector ?? [];
+        if (recorded.length > 0) {
+          const cause = this.collectorCause !== undefined ? this.collectorCause : err;
+          throw new EnvValidationError(recorded, { scope, cause });
+        }
+        throw err;
+      }
+
+      if (isThenable(result)) {
+        throw new TypeError("collectErrors() callback must be synchronous");
+      }
+
+      if (isOutermost) {
+        const recorded = this.collector ?? [];
+        if (recorded.length > 0) {
+          throw new EnvValidationError(
+            recorded,
+            this.collectorCause !== undefined ? { scope, cause: this.collectorCause } : { scope },
+          );
+        }
+      }
+
+      return result;
+    } finally {
+      if (isOutermost) {
+        this.collector = null;
+        this.collectorCause = undefined;
+        this.guardDepth = 0;
+      }
+    }
+  }
+
+  /**
    * Checks whether an environment variable is set.
    *
    * Note: this is a pure existence check — a variable set to an empty string (`KEY=`)
@@ -116,7 +204,7 @@ export class EnvGetterService implements OnModuleDestroy {
    * @returns `true` if the environment variable exists, otherwise `false`.
    */
   isEnvSet(envName: string): boolean {
-    return Object.prototype.hasOwnProperty.call(process.env, envName);
+    return Object.prototype.hasOwnProperty.call(this.source, envName);
   }
 
   /**
@@ -127,18 +215,20 @@ export class EnvGetterService implements OnModuleDestroy {
    * @param allowedValues - (Optional) A list of allowed values for validation.
    *   **Warning:** a disallowed received value is echoed in the error message —
    *   do not use `allowedValues` with secret variables.
-   * @returns The environment variable value as a string.
-   * @throws {Error} If the variable is missing or contains an invalid value.
+   * @returns The environment variable value as a string (or narrowed literal union when `allowedValues` is provided).
+   * @throws {EnvValidationError} If the variable is missing or contains an invalid value.
    */
   getRequiredEnv(envName: string): string;
-  getRequiredEnv(envName: string, allowedValues: string[]): string;
-  getRequiredEnv(envName: string, allowedValues?: string[]): string {
-    this.checkEnvExisting(envName);
+  getRequiredEnv<T extends string>(envName: string, allowedValues: readonly T[]): T;
+  getRequiredEnv(envName: string, allowedValues?: readonly string[]): string {
+    return this.guard(() => {
+      this.checkEnvExisting(envName);
 
-    const envVal = process.env[envName] as string;
-    if (allowedValues?.length) this.checkIfEnvHasAllowedValue(envName, envVal, allowedValues);
+      const envVal = this.source[envName] as string;
+      if (allowedValues?.length) this.checkIfEnvHasAllowedValue(envName, envVal, allowedValues);
 
-    return envVal;
+      return envVal;
+    });
   }
 
   /**
@@ -153,34 +243,36 @@ export class EnvGetterService implements OnModuleDestroy {
    *   **Warning:** a disallowed received value is echoed in the error message —
    *   do not use `allowedValues` with secret variables.
    * @returns The environment variable value, the default value, or `undefined` if not set.
-   * @throws {Error} If the effective value is not in `allowedValues` (if provided).
+   * @throws {EnvValidationError} If the effective value is not in `allowedValues` (if provided).
    */
   getOptionalEnv(envName: string): string | undefined;
   getOptionalEnv(envName: string, defaultValue: string): string;
-  getOptionalEnv(envName: string, allowedValues: string[]): string | undefined;
-  getOptionalEnv(envName: string, defaultValue: string, allowedValues: string[]): string | undefined;
+  getOptionalEnv<T extends string>(envName: string, allowedValues: readonly T[]): T | undefined;
+  getOptionalEnv<T extends string>(envName: string, defaultValue: T, allowedValues: readonly T[]): T;
   getOptionalEnv(
     envName: string,
-    defaultValueOrAllowedValues?: string | string[],
-    allowedValues?: string[],
+    defaultValueOrAllowedValues?: string | readonly string[],
+    allowedValues?: readonly string[],
   ): string | undefined {
-    if (Array.isArray(defaultValueOrAllowedValues)) {
-      // (name, allowedValues) overload — only validate when a non-empty value is present
-      const envValue = process.env[envName] || undefined;
-      if (envValue !== undefined) {
-        this.checkIfEnvHasAllowedValue(envName, envValue, defaultValueOrAllowedValues);
-      }
-      return envValue;
-    } else {
-      // (name, default?, allowedValues?) overload — M9: treat empty as unset
-      const envValue = (process.env[envName] || undefined) ?? defaultValueOrAllowedValues;
+    return this.guard(() => {
+      if (Array.isArray(defaultValueOrAllowedValues)) {
+        // (name, allowedValues) overload — only validate when a non-empty value is present
+        const envValue = this.source[envName] || undefined;
+        if (envValue !== undefined) {
+          this.checkIfEnvHasAllowedValue(envName, envValue, defaultValueOrAllowedValues);
+        }
+        return envValue;
+      } else {
+        // (name, default?, allowedValues?) overload — M9: treat empty as unset
+        const envValue = (this.source[envName] || undefined) ?? (defaultValueOrAllowedValues as string | undefined);
 
-      if (allowedValues?.length && envValue !== undefined) {
-        this.checkIfEnvHasAllowedValue(envName, envValue, allowedValues);
-      }
+        if (allowedValues?.length && envValue !== undefined) {
+          this.checkIfEnvHasAllowedValue(envName, envValue, allowedValues);
+        }
 
-      return envValue;
-    }
+        return envValue;
+      }
+    });
   }
 
   /**
@@ -190,17 +282,19 @@ export class EnvGetterService implements OnModuleDestroy {
    * - Throws an error if the value is not a valid integer or exceeds the safe integer range.
    * @param envName - The name of the environment variable.
    * @returns The integer value of the environment variable.
-   * @throws {Error} If the variable is missing, not a valid integer, or exceeds safe integer range.
+   * @throws {EnvValidationError} If the variable is missing, not a valid integer, or exceeds safe integer range.
    */
   getRequiredNumericEnv(envName: string): number {
-    const envVal = this.getRequiredEnv(envName);
+    return this.guard(() => {
+      const envVal = this.getRequiredEnv(envName);
 
-    if (!/^\d+(?:_\d+)*$/.test(envVal)) this.stopProcess(`Variable '${envName}' is not of number type.`);
+      if (!/^\d+(?:_\d+)*$/.test(envVal)) this.fail(`Variable '${envName}' is not of number type.`);
 
-    const n = Number(envVal.replace(/_/g, ""));
-    if (!Number.isSafeInteger(n)) this.stopProcess(`Variable '${envName}' exceeds the safe integer range.`);
+      const n = Number(envVal.replace(/_/g, ""));
+      if (!Number.isSafeInteger(n)) this.fail(`Variable '${envName}' exceeds the safe integer range.`);
 
-    return n;
+      return n;
+    });
   }
 
   /**
@@ -211,21 +305,23 @@ export class EnvGetterService implements OnModuleDestroy {
    * @param envName - The name of the environment variable.
    * @param defaultValue - (Optional) The default numeric value to return if the variable is not set.
    * @returns The integer value of the environment variable or the default value.
-   * @throws {Error} If the variable is set but not a valid integer or exceeds safe integer range.
+   * @throws {EnvValidationError} If the variable is set but not a valid integer or exceeds safe integer range.
    */
   getOptionalNumericEnv(envName: string): number | undefined;
   getOptionalNumericEnv(envName: string, defaultValue: number): number;
   getOptionalNumericEnv(envName: string, defaultValue?: number): number | undefined {
-    const rawVal = process.env[envName];
+    return this.guard(() => {
+      const rawVal = this.source[envName];
 
-    if (rawVal === undefined || rawVal === "") return defaultValue;
+      if (rawVal === undefined || rawVal === "") return defaultValue;
 
-    if (!/^\d+(?:_\d+)*$/.test(rawVal)) this.stopProcess(`Variable '${envName}' is not of number type.`);
+      if (!/^\d+(?:_\d+)*$/.test(rawVal)) this.fail(`Variable '${envName}' is not of number type.`);
 
-    const n = Number(rawVal.replace(/_/g, ""));
-    if (!Number.isSafeInteger(n)) this.stopProcess(`Variable '${envName}' exceeds the safe integer range.`);
+      const n = Number(rawVal.replace(/_/g, ""));
+      if (!Number.isSafeInteger(n)) this.fail(`Variable '${envName}' exceeds the safe integer range.`);
 
-    return n;
+      return n;
+    });
   }
 
   /**
@@ -235,14 +331,16 @@ export class EnvGetterService implements OnModuleDestroy {
    * - Throws an error if the value is not a valid boolean.
    * @param envName - The name of the environment variable.
    * @returns The boolean value of the environment variable.
-   * @throws {Error} If the variable is missing or not `"true"`/`"false"`.
+   * @throws {EnvValidationError} If the variable is missing or not `"true"`/`"false"`.
    */
   getRequiredBooleanEnv(envName: string): boolean {
-    const envVal = this.getRequiredEnv(envName);
+    return this.guard(() => {
+      const envVal = this.getRequiredEnv(envName);
 
-    if (!/^(true|false)$/.test(envVal)) this.stopProcess(`Variable '${envName}' is not of boolean type.`);
+      if (!/^(true|false)$/.test(envVal)) this.fail(`Variable '${envName}' is not of boolean type.`);
 
-    return envVal === "true";
+      return envVal === "true";
+    });
   }
 
   /**
@@ -252,15 +350,18 @@ export class EnvGetterService implements OnModuleDestroy {
    * @param envName - The name of the environment variable.
    * @param defaultValue - (Optional) The default boolean value if the variable is not set.
    * @returns The boolean value of the environment variable or the default value.
+   * @throws {EnvValidationError} If the variable is set to anything other than `"true"` or `"false"`.
    */
   getOptionalBooleanEnv(envName: string): boolean | undefined;
   getOptionalBooleanEnv(envName: string, defaultValue: boolean): boolean;
   getOptionalBooleanEnv(envName: string, defaultValue?: boolean): boolean | undefined {
-    const raw = process.env[envName];
-    if (raw === undefined || raw === "") return defaultValue;
-    if (raw !== "true" && raw !== "false")
-      this.stopProcess(`Variable '${envName}' is not of boolean type. Expected 'true' or 'false', received '${raw}'.`);
-    return raw === "true";
+    return this.guard(() => {
+      const raw = this.source[envName];
+      if (raw === undefined || raw === "") return defaultValue;
+      if (raw !== "true" && raw !== "false")
+        this.fail(`Variable '${envName}' is not of boolean type. Expected 'true' or 'false', received '${raw}'.`);
+      return raw === "true";
+    });
   }
 
   /**
@@ -269,16 +370,18 @@ export class EnvGetterService implements OnModuleDestroy {
    * - Throws an error if the value is not a valid URL.
    * @param envName - The name of the environment variable.
    * @returns A `URL` object representing the value of the environment variable.
-   * @throws {Error} If the variable is missing or not a valid URL.
+   * @throws {EnvValidationError} If the variable is missing or not a valid URL.
    */
   getRequiredURL(envName: string): URL {
-    const envVal = this.getRequiredEnv(envName);
+    return this.guard(() => {
+      const envVal = this.getRequiredEnv(envName);
 
-    try {
-      return new URL(envVal);
-    } catch (err: unknown) {
-      this.stopProcess(`Variable '${envName}' must be a valid URL. Error: ${this.getErrorMessage(err)}`);
-    }
+      try {
+        return new URL(envVal);
+      } catch (err: unknown) {
+        this.fail(`Variable '${envName}' must be a valid URL. Error: ${this.getErrorMessage(err)}`);
+      }
+    });
   }
 
   /**
@@ -289,18 +392,20 @@ export class EnvGetterService implements OnModuleDestroy {
    * @param envName - The name of the environment variable.
    * @param defaultValue - (Optional) The default URL value to return if the variable is not set.
    * @returns A `URL` object representing the value of the environment variable or the default value.
-   * @throws {Error} If the variable is set but not a valid URL.
+   * @throws {EnvValidationError} If the variable is set but not a valid URL.
    */
   getOptionalURL(envName: string): URL | undefined;
   getOptionalURL(envName: string, defaultValue: URL): URL;
   getOptionalURL(envName: string, defaultValue?: URL): URL | undefined {
-    const envVal = this.getOptionalEnv(envName);
+    return this.guard(() => {
+      const envVal = this.getOptionalEnv(envName);
 
-    try {
-      return envVal ? new URL(envVal) : defaultValue;
-    } catch (err: unknown) {
-      this.stopProcess(`Variable '${envName}' must be a valid URL. Error: ${this.getErrorMessage(err)}`);
-    }
+      try {
+        return envVal ? new URL(envVal) : defaultValue;
+      } catch (err: unknown) {
+        this.fail(`Variable '${envName}' must be a valid URL. Error: ${this.getErrorMessage(err)}`);
+      }
+    });
   }
 
   /**
@@ -313,18 +418,20 @@ export class EnvGetterService implements OnModuleDestroy {
    * @param envName - The name of the required environment variable.
    * @param resultIn - The desired time unit for the result (default is `"ms"`).
    * @returns The parsed time period converted to the specified unit.
-   * @throws Will stop the process if the environment variable is missing or has an invalid format.
+   * @throws {EnvValidationError} If the environment variable is missing or has an invalid format.
    */
   getRequiredTimePeriod(envName: string, resultIn: TimeMarker = "ms") {
-    const envVal = this.getRequiredEnv(envName);
+    return this.guard(() => {
+      const envVal = this.getRequiredEnv(envName);
 
-    // validating the ENV value
-    if (!isTimePeriod(envVal))
-      this.stopProcess(
-        `Variable '${envName}' is not in the acceptable format. It must be: <number><"ms"|"s"|"m"|"h"|"d">. Ex.: '12h', '2d', '2D', '2 d'`,
-      );
+      // validating the ENV value
+      if (!isTimePeriod(envVal))
+        this.fail(
+          `Variable '${envName}' is not in the acceptable format. It must be: <number><"ms"|"s"|"m"|"h"|"d">. Ex.: '12h', '2d', '2D', '2 d'`,
+        );
 
-    return parseTimePeriod(envVal, resultIn);
+      return parseTimePeriod(envVal, resultIn);
+    });
   }
 
   /**
@@ -339,7 +446,11 @@ export class EnvGetterService implements OnModuleDestroy {
    * - Also accepts a raw number default (treated as milliseconds).
    * - Throws if the env value is set but invalid, or if the default is invalid.
    * - Note: `Math.ceil` is applied to the result (e.g. `1500ms` → `2s`).
-   * @throws Will stop the process if the environment variable or default value is invalid.
+   * @param envName - The name of the environment variable.
+   * @param defaultValueOrResultIn - Either the result unit (`TimeMarker`) or a fallback default value.
+   * @param resultIn - The desired time unit for the result (default is `"ms"`).
+   * @returns The parsed time period converted to the specified unit, or `undefined` when unset without default.
+   * @throws {EnvValidationError} If the environment variable or default value is invalid.
    */
   getOptionalTimePeriod(envName: string): number | undefined;
   getOptionalTimePeriod(envName: string, resultIn: TimeMarker): number | undefined;
@@ -349,40 +460,42 @@ export class EnvGetterService implements OnModuleDestroy {
     defaultValueOrResultIn?: string | number | TimeMarker,
     resultIn?: TimeMarker,
   ): number | undefined {
-    const TIME_MARKERS: TimeMarker[] = ["ms", "s", "m", "h", "d"];
-    const baseErrorMessage = `'${envName}' is not in the acceptable format. It must be: <number><"ms"|"s"|"m"|"h"|"d">. Ex.: '12h', '2d', '2D', '2 d'`;
+    return this.guard(() => {
+      const TIME_MARKERS: TimeMarker[] = ["ms", "s", "m", "h", "d"];
+      const baseErrorMessage = `'${envName}' is not in the acceptable format. It must be: <number><"ms"|"s"|"m"|"h"|"d">. Ex.: '12h', '2d', '2D', '2 d'`;
 
-    // Disambiguate arg 2: bare TimeMarker with no arg 3 → resultIn, otherwise → defaultValue
-    let defaultValue: string | number | undefined;
-    let resolvedResultIn: TimeMarker;
+      // Disambiguate arg 2: bare TimeMarker with no arg 3 → resultIn, otherwise → defaultValue
+      let defaultValue: string | number | undefined;
+      let resolvedResultIn: TimeMarker;
 
-    if (
-      typeof defaultValueOrResultIn === "string" &&
-      TIME_MARKERS.includes(defaultValueOrResultIn as TimeMarker) &&
-      resultIn === undefined
-    ) {
-      // (name, resultIn) overload
-      defaultValue = undefined;
-      resolvedResultIn = defaultValueOrResultIn as TimeMarker;
-    } else {
-      defaultValue = defaultValueOrResultIn as string | number | undefined;
-      resolvedResultIn = resultIn ?? "ms";
-    }
+      if (
+        typeof defaultValueOrResultIn === "string" &&
+        TIME_MARKERS.includes(defaultValueOrResultIn as TimeMarker) &&
+        resultIn === undefined
+      ) {
+        // (name, resultIn) overload
+        defaultValue = undefined;
+        resolvedResultIn = defaultValueOrResultIn as TimeMarker;
+      } else {
+        defaultValue = defaultValueOrResultIn as string | number | undefined;
+        resolvedResultIn = resultIn ?? "ms";
+      }
 
-    if (defaultValue !== undefined && !isTimePeriod(defaultValue))
-      this.stopProcess(`The default value for the environment variable ${baseErrorMessage}`);
+      if (defaultValue !== undefined && !isTimePeriod(defaultValue))
+        this.fail(`The default value for the environment variable ${baseErrorMessage}`);
 
-    const envVal = process.env[envName];
+      const envVal = this.source[envName];
 
-    // Absent or empty → return default or undefined (M9)
-    if (envVal === undefined || envVal === "") {
-      return defaultValue !== undefined ? parseTimePeriod(defaultValue, resolvedResultIn) : undefined;
-    }
+      // Absent or empty → return default or undefined (M9)
+      if (envVal === undefined || envVal === "") {
+        return defaultValue !== undefined ? parseTimePeriod(defaultValue, resolvedResultIn) : undefined;
+      }
 
-    // Present but invalid → throw
-    if (!isTimePeriod(envVal)) this.stopProcess(`Variable ${baseErrorMessage}`);
+      // Present but invalid → throw
+      if (!isTimePeriod(envVal)) this.fail(`Variable ${baseErrorMessage}`);
 
-    return parseTimePeriod(envVal, resolvedResultIn);
+      return parseTimePeriod(envVal, resolvedResultIn);
+    });
   }
 
   /**
@@ -393,7 +506,7 @@ export class EnvGetterService implements OnModuleDestroy {
    * - Throws an error if the variable is missing or invalid.
    * @param envName - The name of the required environment variable.
    * @returns A CronSchedule instance wrapping the validated cron expression.
-   * @throws {Error} If the variable is missing or not a valid cron expression.
+   * @throws {EnvValidationError} If the variable is missing or not a valid cron expression.
    * @example
    * // 5-field format: minute hour day-of-month month day-of-week
    * const schedule = this.envGetter.getRequiredCron('BACKUP_SCHEDULE');
@@ -406,25 +519,29 @@ export class EnvGetterService implements OnModuleDestroy {
    * // ENV: '0 30 9 * * MON-FRI' (runs at 9:30:00 AM on weekdays)
    */
   getRequiredCron(envName: string): CronSchedule {
-    const envVal = this.getRequiredEnv(envName);
+    return this.guard(() => {
+      const envVal = this.getRequiredEnv(envName);
 
-    if (!isValidCronExpression(envVal)) {
-      return this.stopProcess(
-        `Variable '${envName}' is not a valid cron expression. Expected 5 or 6 fields: [second] minute hour day-of-month month day-of-week`,
-      );
-    }
+      if (!isValidCronExpression(envVal)) {
+        return this.fail(
+          `Variable '${envName}' is not a valid cron expression. Expected 5 or 6 fields: [second] minute hour day-of-month month day-of-week`,
+        );
+      }
 
-    return new CronSchedule(envVal);
+      return new CronSchedule(envVal);
+    });
   }
 
   /**
    * Retrieves and parses an optional environment variable as a cron schedule.
-   * - If the variable is not set, returns undefined.
+   * - If `defaultValue` is provided, validates it on every call (even when the variable is set).
+   * - If the variable is not set or empty, returns a `CronSchedule` for `defaultValue` (or `undefined` when omitted).
    * - If the variable is set, validates that it is a valid cron expression.
-   * - Throws an error if the variable is set but contains an invalid cron expression.
+   * - Throws an error if the variable or `defaultValue` is not a valid cron expression.
    * @param envName - The name of the environment variable.
-   * @returns A CronSchedule instance if the variable is set and valid, undefined otherwise.
-   * @throws {Error} If the variable is set but not a valid cron expression.
+   * @param defaultValue - (Optional) Default cron expression string used when the variable is unset or empty.
+   * @returns A CronSchedule instance if the variable or default is present and valid, `undefined` otherwise.
+   * @throws {EnvValidationError} If the variable or `defaultValue` is not a valid cron expression.
    * @example
    * // Optional cron without default - returns undefined if not set
    * const schedule = this.envGetter.getOptionalCron('CLEANUP_SCHEDULE');
@@ -432,25 +549,34 @@ export class EnvGetterService implements OnModuleDestroy {
    *   console.log('Next cleanup at:', schedule.getNextTime());
    * }
    *
-   * // 5-field format: minute hour day-of-month month day-of-week
-   * // 6-field format: second minute hour day-of-month month day-of-week
+   * // Optional cron with default
+   * const scheduleWithDefault = this.envGetter.getOptionalCron('CLEANUP_SCHEDULE', '0 3 * * *');
    */
-  getOptionalCron(envName: string): CronSchedule | undefined {
-    const envVal = process.env[envName];
+  getOptionalCron(envName: string): CronSchedule | undefined;
+  getOptionalCron(envName: string, defaultValue: string): CronSchedule;
+  getOptionalCron(envName: string, defaultValue?: string): CronSchedule | undefined {
+    return this.guard(() => {
+      const expectedMsg =
+        "is not a valid cron expression. Expected 5 or 6 fields: [second] minute hour day-of-month month day-of-week";
 
-    // Absent or empty → undefined (M9)
-    if (envVal === undefined || envVal === "") {
-      return undefined;
-    }
+      if (defaultValue !== undefined && !isValidCronExpression(defaultValue)) {
+        return this.fail(`The default value for the environment variable '${envName}' ${expectedMsg}`);
+      }
 
-    // Set but invalid → throw
-    if (!isValidCronExpression(envVal)) {
-      return this.stopProcess(
-        `Variable '${envName}' is not a valid cron expression. Expected 5 or 6 fields: [second] minute hour day-of-month month day-of-week`,
-      );
-    }
+      const envVal = this.source[envName];
 
-    return new CronSchedule(envVal);
+      // Absent or empty → default or undefined (M9)
+      if (envVal === undefined || envVal === "") {
+        return defaultValue !== undefined ? new CronSchedule(defaultValue) : undefined;
+      }
+
+      // Set but invalid → throw
+      if (!isValidCronExpression(envVal)) {
+        return this.fail(`Variable '${envName}' ${expectedMsg}`);
+      }
+
+      return new CronSchedule(envVal);
+    });
   }
 
   /**
@@ -460,10 +586,11 @@ export class EnvGetterService implements OnModuleDestroy {
    * - Optionally validates and instantiates the object using a provided class.
    * - Throws an error if parsing fails or if instantiation using the class fails.
    * @template R - The expected type of the parsed object.
+   * @template C - The class constructor type (if provided).
    * @param envName - The name of the environment variable.
    * @param cls - (Optional) A class constructor to validate and instantiate the parsed object.
    * @returns The parsed object, optionally instantiated as an instance of `cls`.
-   * @throws {Error} If the environment variable is missing, cannot be parsed, or fails validation.
+   * @throws {EnvValidationError} If the environment variable is missing, cannot be parsed, or fails validation.
    * @example
    * // Define a class for validation
    * class Config {
@@ -487,42 +614,83 @@ export class EnvGetterService implements OnModuleDestroy {
     envName: string,
     cls?: C,
   ): C extends ClassConstructor<infer T> ? T : R {
-    const envVal = this.getRequiredEnv(envName);
-
-    const baseErrorMessage = `Cannot parse object from variable '${envName}'. Error:`;
-    let parsedObj: Record<string, unknown>;
-
-    try {
-      parsedObj = this.deepSanitize(JSON.parse(envVal));
-    } catch (error: unknown) {
-      this.stopProcess(`${baseErrorMessage} ${this.sanitizeJsonError(error)}`);
-    }
-
-    if (!cls) return parsedObj as C extends ClassConstructor<infer T> ? T : R;
-
-    try {
-      return new cls(parsedObj) as C extends ClassConstructor<infer T> ? T : R;
-    } catch (error: unknown) {
-      this.stopProcess(`${baseErrorMessage} ${this.getErrorMessage(error)}`);
-    }
+    return this.guard(() => {
+      const envVal = this.getRequiredEnv(envName);
+      return this.parseObjectFromEnvValue<R, C>(envName, envVal, cls);
+    });
   }
 
   /**
-   * Retrieves and parses an environment variable as an array.
-   * @template R - The expected type of array elements.
+   * Retrieves and parses an optional environment variable as an object from a JSON string.
+   * - If the variable is unset or empty (`""`), returns `defaultValue` (or `new cls(defaultValue)` when `cls` is given),
+   *   or `undefined` when no default is given.
+   * - If `defaultValue` is validated with `cls` and fails, throws an `EnvValidationError`.
+   * - If the variable is set, parses and validates it identically to `getRequiredObject`.
+   * - Note: `defaultValue` must be plain data; a function-typed second argument is treated as `cls`.
+   * @template R - The expected type of the parsed object.
+   * @template C - The class constructor type (if provided).
+   * @param envName - The name of the environment variable.
+   * @param defaultValueOrCls - (Optional) Either the plain-data default object or a class constructor.
+   * @param cls - (Optional) A class constructor to validate and instantiate the object.
+   * @returns The parsed object, default object, or `undefined` when unset without a default.
+   * @throws {EnvValidationError} If the set value cannot be parsed or fails validation, or if `defaultValue` fails class validation.
+   */
+  getOptionalObject<R = unknown>(envName: string): R | undefined;
+  getOptionalObject<C extends ClassConstructor<unknown>>(envName: string, cls: C): InstanceType<C> | undefined;
+  getOptionalObject<R>(envName: string, defaultValue: R): R;
+  getOptionalObject<R, C extends ClassConstructor<unknown>>(envName: string, defaultValue: R, cls: C): InstanceType<C>;
+  getOptionalObject<R = unknown, C extends ClassConstructor<unknown> | undefined = undefined>(
+    envName: string,
+    defaultValueOrCls?: R | C,
+    cls?: C,
+  ): (C extends ClassConstructor<infer T> ? T : R) | undefined {
+    return this.guard(() => {
+      let resolvedDefault: R | undefined;
+      let resolvedCls: C | undefined;
+
+      if (typeof defaultValueOrCls === "function") {
+        resolvedDefault = undefined;
+        resolvedCls = defaultValueOrCls as C;
+      } else {
+        resolvedDefault = defaultValueOrCls as R | undefined;
+        resolvedCls = cls;
+      }
+
+      const rawVal = this.source[envName];
+      if (rawVal === undefined || rawVal === "") {
+        if (resolvedDefault === undefined) {
+          return undefined;
+        }
+        if (resolvedCls) {
+          try {
+            return new resolvedCls(resolvedDefault) as C extends ClassConstructor<infer T> ? T : R;
+          } catch (error: unknown) {
+            return this.fail(`The default value for '${envName}' failed validation: ${this.getErrorMessage(error)}`);
+          }
+        }
+        return resolvedDefault as C extends ClassConstructor<infer T> ? T : R;
+      }
+
+      return this.parseObjectFromEnvValue<R, C>(envName, rawVal, resolvedCls);
+    });
+  }
+
+  /**
+   * Retrieves and parses a required environment variable as a JSON array.
+   * @template R - The expected type of array elements (or tuple type).
    * @param envName - The name of the environment variable to retrieve.
-   * @param validate - A function to validate each array element.
-   * @returns The parsed array or `undefined` if optional.
-   * @throws If the environment variable is missing, cannot be parsed, is not an array, or fails validation.
+   * @param validate - (Optional) A function to validate each array element.
+   * @returns The parsed array.
+   * @throws {EnvValidationError} If the environment variable is missing, cannot be parsed, is not an array, or fails validation.
    * @example
-   * this.forwardHeaders = this.envService.parseArrayFromEnv<string>('FORWARD_HEADERS');
+   * this.forwardHeaders = this.envService.getRequiredArray<string>('FORWARD_HEADERS');
    * @example
-   * this.forwardHeaders = this.envService.parseArrayFromEnv<string>(
+   * this.forwardHeaders = this.envService.getRequiredArray<string>(
    *    'FORWARD_HEADERS',
    *    (el) => typeof el === 'string'
    * );
    * @example
-   * this.forwardHeaders = this.envService.parseArrayFromEnv<[string, number]>(
+   * this.forwardHeaders = this.envService.getRequiredArray<[string, number]>(
    *    'FORWARD_HEADERS',
    *    (el, i, arr) => {
    *      if (arr?.length !== 2) return 'FORWARD_HEADERS must be an array of 2 valid items';
@@ -533,36 +701,151 @@ export class EnvGetterService implements OnModuleDestroy {
    * );
    */
   getRequiredArray<R = unknown>(envName: string, validate?: ArrayValidatorType<R>): R extends unknown[] ? R : R[] {
-    const envVal = this.getRequiredEnv(envName);
-    const baseErrorMessage = `Cannot parse an array from variable '${envName}'. Error:`;
-    let parsedArray: unknown[];
+    return this.guard(() => {
+      const envVal = this.getRequiredEnv(envName);
+      return this.parseArrayFromEnvValue<R>(envName, envVal, validate, "getRequiredArray");
+    });
+  }
 
-    try {
-      parsedArray = this.deepSanitize(JSON.parse(envVal));
-    } catch (error: unknown) {
-      this.stopProcess(`${baseErrorMessage} ${this.sanitizeJsonError(error)}`);
-    }
+  /**
+   * Retrieves and parses an optional environment variable as a JSON array.
+   * - If the variable is unset or empty (`""`), returns `defaultValue` (validated with `validate` if provided)
+   *   or `undefined` when no default is given.
+   * - If the variable is set, parses and validates it identically to `getRequiredArray`.
+   * @template R - The expected type of array elements (or tuple type).
+   * @param envName - The name of the environment variable to retrieve.
+   * @param defaultValueOrValidate - (Optional) Either the default array or a validator function.
+   * @param validate - (Optional) A function to validate each array element.
+   * @returns The parsed array, the default array, or `undefined` if not set.
+   * @throws {EnvValidationError} If the variable or default is invalid, not an array, or fails element validation.
+   */
+  getOptionalArray<R = unknown>(
+    envName: string,
+    validate?: ArrayValidatorType<R>,
+  ): (R extends unknown[] ? R : R[]) | undefined;
+  getOptionalArray<R = unknown>(
+    envName: string,
+    defaultValue: R extends unknown[] ? R : R[],
+    validate?: ArrayValidatorType<R>,
+  ): R extends unknown[] ? R : R[];
+  getOptionalArray<R = unknown>(
+    envName: string,
+    defaultValueOrValidate?: (R extends unknown[] ? R : R[]) | ArrayValidatorType<R>,
+    validate?: ArrayValidatorType<R>,
+  ): (R extends unknown[] ? R : R[]) | undefined {
+    return this.guard(() => {
+      let defaultValue: (R extends unknown[] ? R : R[]) | undefined;
+      let validator: ArrayValidatorType<R> | undefined;
 
-    if (!Array.isArray(parsedArray)) this.stopProcess(`'${envName}' must be a stringified array`);
+      if (typeof defaultValueOrValidate === "function") {
+        validator = defaultValueOrValidate as ArrayValidatorType<R>;
+      } else if (defaultValueOrValidate !== undefined) {
+        if (!Array.isArray(defaultValueOrValidate)) {
+          return this.fail(`The default value for '${envName}' must be an array`);
+        }
+        defaultValue = defaultValueOrValidate;
+        validator = validate;
+      } else {
+        validator = validate;
+      }
 
-    if (typeof validate === "function") {
-      // validate each element of parsed array
-      parsedArray.forEach((el, i) => {
-        const result = (validate as ArrayValidatorType<R>)(el, i, parsedArray as R extends unknown[] ? R : R[]);
+      const rawVal = this.source[envName];
+      if (rawVal === undefined || rawVal === "") {
+        if (defaultValue === undefined) {
+          return undefined;
+        }
+        if (typeof validator === "function") {
+          this.validateArrayElements(envName, defaultValue, validator, true, "getOptionalArray");
+        }
+        return defaultValue;
+      }
 
-        // check if validator works correct
-        if (!["boolean", "string"].includes(typeof result) || result === "")
-          this.stopProcess(
-            `The validation func of EnvGetterService.getRequiredArray('${envName}') must return a boolean or non-empty string.`,
-          );
+      return this.parseArrayFromEnvValue<R>(envName, rawVal, validator, "getOptionalArray");
+    });
+  }
 
-        // validate element
-        if (result === false || (typeof result === "string" && result))
-          this.stopProcess(typeof result === "string" ? result : `'${envName}[${i}]' failed validation`);
-      });
-    }
+  /**
+   * Retrieves and parses a required delimiter-separated list from an environment variable.
+   * - Splits on `options.separator` (defaults to `","`) and trims each item.
+   * - Rejects empty items (such as trailing separators or whitespace-only entries).
+   * - If `options.allowedValues` is provided, validates each item against the allowed list.
+   *   **Warning:** a disallowed value is echoed in the error message — do not use `allowedValues` with secrets.
+   * - Values cannot contain the separator themselves; use `getRequiredArray` (JSON) if items may contain the delimiter.
+   * @param envName - The name of the required environment variable.
+   * @param options - (Optional) Separator and allowed-values options.
+   * @returns An array of trimmed non-empty strings (or narrowed literal union `T[]`).
+   * @throws {EnvValidationError} If the variable is missing, empty, contains an empty item, or fails `allowedValues` validation.
+   */
+  getRequiredList(envName: string, options?: ListOptions): string[];
+  getRequiredList<T extends string>(envName: string, options: ListOptions & { allowedValues: readonly T[] }): T[];
+  getRequiredList<T extends string = string>(
+    envName: string,
+    options?: ListOptions & { allowedValues?: readonly T[] },
+  ): T[] {
+    return this.guard(() => {
+      const separator = this.resolveListSeparator(envName, options);
+      const envVal = this.getRequiredEnv(envName);
+      return this.parseListItems<T>(envName, envVal, separator, options?.allowedValues);
+    });
+  }
 
-    return parsedArray as R extends unknown[] ? R : R[];
+  /**
+   * Retrieves and parses an optional delimiter-separated list from an environment variable.
+   * - Unset or empty (`""`) returns a shallow copy of `defaultValue` (`[...defaultValue]`) or `undefined`.
+   * - Splits on `options.separator` (defaults to `","`) and trims each item.
+   * - Rejects empty items (such as trailing separators or whitespace-only entries).
+   * - If `options.allowedValues` is provided, validates each item (including default items) against the allowed list.
+   *   **Warning:** a disallowed value is echoed in the error message — do not use `allowedValues` with secrets.
+   * @param envName - The name of the environment variable.
+   * @param defaultValueOrOptions - (Optional) Either a default list of strings or `ListOptions`.
+   * @param options - (Optional) Separator and allowed-values options when `defaultValue` is provided.
+   * @returns An array of trimmed strings, a copy of `defaultValue`, or `undefined` when unset without default.
+   * @throws {EnvValidationError} If `separator` is empty, an item is empty, or an item is not in `allowedValues`.
+   */
+  getOptionalList(envName: string, options?: ListOptions): string[] | undefined;
+  getOptionalList<T extends string>(
+    envName: string,
+    options: ListOptions & { allowedValues: readonly T[] },
+  ): T[] | undefined;
+  getOptionalList(envName: string, defaultValue: readonly string[], options?: ListOptions): string[];
+  getOptionalList<T extends string>(
+    envName: string,
+    defaultValue: readonly T[],
+    options: ListOptions & { allowedValues: readonly T[] },
+  ): T[];
+  getOptionalList<T extends string = string>(
+    envName: string,
+    defaultValueOrOptions?: readonly T[] | (ListOptions & { allowedValues?: readonly T[] }),
+    options?: ListOptions & { allowedValues?: readonly T[] },
+  ): T[] | undefined {
+    return this.guard(() => {
+      let defaultValue: readonly T[] | undefined;
+      let resolvedOptions: (ListOptions & { allowedValues?: readonly T[] }) | undefined;
+
+      if (Array.isArray(defaultValueOrOptions)) {
+        defaultValue = defaultValueOrOptions as readonly T[];
+        resolvedOptions = options;
+      } else {
+        defaultValue = undefined;
+        resolvedOptions = defaultValueOrOptions as (ListOptions & { allowedValues?: readonly T[] }) | undefined;
+      }
+
+      const separator = this.resolveListSeparator(envName, resolvedOptions);
+      const allowedValues = resolvedOptions?.allowedValues;
+
+      if (defaultValue !== undefined && allowedValues?.length) {
+        for (const item of defaultValue) {
+          this.checkIfEnvHasAllowedValue(envName, item, allowedValues);
+        }
+      }
+
+      const rawVal = this.source[envName];
+      if (rawVal === undefined || rawVal === "") {
+        return defaultValue !== undefined ? [...defaultValue] : undefined;
+      }
+
+      return this.parseListItems<T>(envName, rawVal, separator, allowedValues);
+    });
   }
 
   /**
@@ -580,7 +863,7 @@ export class EnvGetterService implements OnModuleDestroy {
    * @param cls - (Optional) A class constructor to validate and instantiate the parsed config.
    * @param watcherOptions - (Optional) Configuration for file watching behavior.
    * @returns The parsed config, optionally instantiated as an instance of `cls`. The returned value will always reflect the latest file content.
-   * @throws {Error} If the file is missing, cannot be parsed, or fails validation.
+   * @throws {EnvValidationError} If the file is missing, cannot be parsed, or fails validation.
    * @example
    * // Without class validation
    * const config = this.envGetter.getRequiredConfigFromFile<{ apiKey: string }>('config.json');
@@ -605,24 +888,26 @@ export class EnvGetterService implements OnModuleDestroy {
     cls?: C,
     watcherOptions?: FileWatcherOptions,
   ): C extends ClassConstructor<infer T> ? WithConfigEvents<T> : WithConfigEvents<R> {
-    const absolutePath = this.resolveFilePath(filePath);
+    return this.guard(() => {
+      const absolutePath = this.resolveFilePath(filePath);
 
-    if (!existsSync(absolutePath)) this.stopProcess(`Config file '${absolutePath}' does not exist.`);
+      if (!existsSync(absolutePath)) this.fail(`Config file '${absolutePath}' does not exist.`);
 
-    // Check if already cached, return cached value
-    if (absolutePath in this.configsStorage) {
-      return this.configsStorage[absolutePath] as C extends ClassConstructor<infer T>
-        ? WithConfigEvents<T>
-        : WithConfigEvents<R>;
-    }
+      // Check if already cached, return cached value
+      if (absolutePath in this.configsStorage) {
+        return this.configsStorage[absolutePath] as C extends ClassConstructor<infer T>
+          ? WithConfigEvents<T>
+          : WithConfigEvents<R>;
+      }
 
-    // Read and parse the file for the first time
-    const config = this.readAndParseConfigFile<R, C>(absolutePath, cls);
+      // Read and parse the file for the first time
+      const config = this.readAndParseConfigFile<R, C>(absolutePath, cls);
 
-    // Setup file watcher
-    this.setupFileWatcher(absolutePath, cls, watcherOptions, false);
+      // Setup file watcher
+      this.setupFileWatcher(absolutePath, cls, watcherOptions, false);
 
-    return config as C extends ClassConstructor<infer T> ? WithConfigEvents<T> : WithConfigEvents<R>;
+      return config as C extends ClassConstructor<infer T> ? WithConfigEvents<T> : WithConfigEvents<R>;
+    });
   }
 
   /**
@@ -634,7 +919,7 @@ export class EnvGetterService implements OnModuleDestroy {
    * - Sets up a file watcher to automatically reload the config on file changes. If the file is
    *   absent (at call time or after deletion), the parent directory is watched so the config
    *   loads as soon as the file appears (requires the parent directory to exist).
-   * - Only throws an error if validation fails (when using a class constructor).
+   * - Only throws an error if validation fails (when using a class constructor) or if `filePath` escapes `configBaseDir`.
    *
    * Note: when the file is absent and no `defaultValue` is given, the returned `undefined`
    * cannot retroactively become the config once the file appears — subscribe to
@@ -651,7 +936,7 @@ export class EnvGetterService implements OnModuleDestroy {
    * @param cls - (Optional) A class constructor to validate and instantiate the parsed config.
    * @param watcherOptions - (Optional) Configuration for file watching behavior.
    * @returns The parsed config, the default value (with event methods), or undefined. The returned value will always reflect the latest file content if the file exists.
-   * @throws {Error} Only if validation fails (when using a class constructor).
+   * @throws {EnvValidationError} Only if validation fails (when using a class constructor) or path traversal is detected.
    * @example
    * // Without default value
    * const config = this.envGetter.getOptionalConfigFromFile<{ apiKey?: string }>('config.json');
@@ -691,6 +976,16 @@ export class EnvGetterService implements OnModuleDestroy {
     defaultValue: R,
     cls: C,
   ): WithConfigEvents<InstanceType<C>>;
+  getOptionalConfigFromFile<R = unknown>(
+    filePath: string,
+    defaultValue: undefined,
+    watcherOptions: FileWatcherOptions,
+  ): WithConfigEvents<R> | undefined;
+  getOptionalConfigFromFile<R>(
+    filePath: string,
+    defaultValue: R,
+    watcherOptions: FileWatcherOptions,
+  ): WithConfigEvents<R>;
   getOptionalConfigFromFile<C extends ClassConstructor<unknown>>(
     filePath: string,
     cls: C,
@@ -705,40 +1000,95 @@ export class EnvGetterService implements OnModuleDestroy {
   ): C extends ClassConstructor<infer T>
     ? WithConfigEvents<T> | WithConfigEvents<R> | undefined
     : WithConfigEvents<R> | undefined {
-    const absolutePath = this.resolveFilePath(filePath);
+    return this.guard(() => {
+      const absolutePath = this.resolveFilePath(filePath);
 
-    // Determine the parameters (shared by the missing-file and exists paths)
-    let cls: C | undefined;
-    let options: FileWatcherOptions | undefined;
+      // Determine the parameters (shared by the missing-file and exists paths)
+      let cls: C | undefined;
+      let options: FileWatcherOptions | undefined;
 
-    if (typeof defaultValueOrCls === "function") {
-      // Pattern: (filePath, cls) or (filePath, cls, watcherOptions)
-      cls = defaultValueOrCls as C;
-      options = clsOrWatcherOptions as FileWatcherOptions | undefined;
-    } else if (typeof clsOrWatcherOptions === "function") {
-      // Pattern: (filePath, defaultValue, cls) or (filePath, defaultValue, cls, watcherOptions)
-      cls = clsOrWatcherOptions as C;
-      options = watcherOptions;
-    } else {
-      // Pattern: (filePath) or (filePath, defaultValue)
-      cls = undefined;
-      options = clsOrWatcherOptions as FileWatcherOptions | undefined;
-    }
-
-    // If file doesn't exist
-    if (!existsSync(absolutePath)) {
-      // Check if defaultValueOrCls is a class constructor
       if (typeof defaultValueOrCls === "function") {
-        // No default — still set up a pending watcher so creation is caught (E2)
+        // Pattern: (filePath, cls) or (filePath, cls, watcherOptions)
+        cls = defaultValueOrCls as C;
+        options = clsOrWatcherOptions as FileWatcherOptions | undefined;
+      } else if (typeof clsOrWatcherOptions === "function") {
+        // Pattern: (filePath, defaultValue, cls) or (filePath, defaultValue, cls, watcherOptions)
+        cls = clsOrWatcherOptions as C;
+        options = watcherOptions;
+      } else {
+        // Pattern: (filePath), (filePath, defaultValue), or (filePath, defaultValue, watcherOptions)
+        cls = undefined;
+        options = clsOrWatcherOptions as FileWatcherOptions | undefined;
+      }
+
+      // If file doesn't exist
+      if (!existsSync(absolutePath)) {
+        // Check if defaultValueOrCls is a class constructor
+        if (typeof defaultValueOrCls === "function") {
+          // No default — still set up a pending watcher so creation is caught (E2)
+          this.setupPendingFileWatcher(absolutePath, cls, options, true);
+          return undefined as C extends ClassConstructor<infer T>
+            ? WithConfigEvents<T> | WithConfigEvents<R> | undefined
+            : WithConfigEvents<R> | undefined;
+        }
+
+        // If we have a default value, store it in configsStorage so the in-place update path
+        // can mutate the caller's reference when the file later appears (E2, reference stability)
+        if (defaultValueOrCls !== undefined) {
+          const defaultWithEvents =
+            typeof defaultValueOrCls === "object" && defaultValueOrCls !== null
+              ? this.safeObjectCopy(defaultValueOrCls as Record<string, unknown>)
+              : defaultValueOrCls;
+
+          if (typeof defaultWithEvents === "object" && defaultWithEvents !== null) {
+            this.configsStorage[absolutePath] = defaultWithEvents;
+            this.attachEventMethods(defaultWithEvents as Record<string, unknown>, absolutePath);
+          }
+
+          this.setupPendingFileWatcher(absolutePath, cls, options, true);
+
+          return defaultWithEvents as C extends ClassConstructor<infer T>
+            ? WithConfigEvents<T> | WithConfigEvents<R> | undefined
+            : WithConfigEvents<R> | undefined;
+        }
+
+        // No default — set up pending watcher so `updated:<path>` fires on creation (E2)
         this.setupPendingFileWatcher(absolutePath, cls, options, true);
         return undefined as C extends ClassConstructor<infer T>
           ? WithConfigEvents<T> | WithConfigEvents<R> | undefined
           : WithConfigEvents<R> | undefined;
       }
 
-      // If we have a default value, store it in configsStorage so the in-place update path
-      // can mutate the caller's reference when the file later appears (E2, reference stability)
-      if (defaultValueOrCls !== undefined) {
+      // Check if already cached, return cached value
+      if (absolutePath in this.configsStorage) {
+        return this.configsStorage[absolutePath] as C extends ClassConstructor<infer T>
+          ? WithConfigEvents<T> | WithConfigEvents<R> | undefined
+          : WithConfigEvents<R> | undefined;
+      }
+
+      // Read and parse the file
+      let config: C extends ClassConstructor<infer T> ? T : R;
+      try {
+        config = this.readAndParseConfigFile<R, C>(absolutePath, cls, true, true);
+      } catch (error: unknown) {
+        // For optional config files, return default value if file reading or JSON parsing fails
+        // Only re-throw if it's a validation error (when cls is provided and validation fails)
+        const isValidationError = cls && error instanceof Error && error.message.includes("Validation failed");
+
+        if (isValidationError) {
+          // Always crash on validation errors, even for optional configs
+          throw error;
+        }
+
+        if (typeof defaultValueOrCls === "function" || defaultValueOrCls === undefined) {
+          // Pattern: (filePath), (filePath, cls[, opts]), or (filePath, undefined, opts) — install watcher & return undefined (BUG-4)
+          this.setupFileWatcher(absolutePath, cls, options, true);
+          return undefined as C extends ClassConstructor<infer T>
+            ? WithConfigEvents<T> | WithConfigEvents<R> | undefined
+            : WithConfigEvents<R> | undefined;
+        }
+
+        // Pattern: (filePath, defaultValue, ...) — cache object default, attach events, and install watcher (BUG-4)
         const defaultWithEvents =
           typeof defaultValueOrCls === "object" && defaultValueOrCls !== null
             ? this.safeObjectCopy(defaultValueOrCls as Record<string, unknown>)
@@ -749,81 +1099,49 @@ export class EnvGetterService implements OnModuleDestroy {
           this.attachEventMethods(defaultWithEvents as Record<string, unknown>, absolutePath);
         }
 
-        this.setupPendingFileWatcher(absolutePath, cls, options, true);
+        this.setupFileWatcher(absolutePath, cls, options, true);
 
         return defaultWithEvents as C extends ClassConstructor<infer T>
           ? WithConfigEvents<T> | WithConfigEvents<R> | undefined
           : WithConfigEvents<R> | undefined;
       }
 
-      // No default — set up pending watcher so `updated:<path>` fires on creation (E2)
-      this.setupPendingFileWatcher(absolutePath, cls, options, true);
-      return undefined as C extends ClassConstructor<infer T>
+      // Setup file watcher
+      this.setupFileWatcher(absolutePath, cls, options, true);
+
+      return config as C extends ClassConstructor<infer T>
         ? WithConfigEvents<T> | WithConfigEvents<R> | undefined
         : WithConfigEvents<R> | undefined;
-    }
-
-    // Check if already cached, return cached value
-    if (absolutePath in this.configsStorage) {
-      return this.configsStorage[absolutePath] as C extends ClassConstructor<infer T>
-        ? WithConfigEvents<T> | WithConfigEvents<R> | undefined
-        : WithConfigEvents<R> | undefined;
-    }
-
-    // Read and parse the file
-    let config: C extends ClassConstructor<infer T> ? T : R;
-    try {
-      config = this.readAndParseConfigFile<R, C>(absolutePath, cls, true, false, true);
-    } catch (error: unknown) {
-      // For optional config files, return default value if file reading or JSON parsing fails
-      // Only re-throw if it's a validation error (when cls is provided and validation fails)
-      const isValidationError = cls && error instanceof Error && error.message.includes("Validation failed");
-
-      if (isValidationError) {
-        // Always crash on validation errors, even for optional configs
-        throw error;
-      }
-
-      if (typeof defaultValueOrCls === "function") {
-        // Pattern: (filePath, cls) - no default value, return undefined
-        return undefined as C extends ClassConstructor<infer T>
-          ? WithConfigEvents<T> | WithConfigEvents<R> | undefined
-          : WithConfigEvents<R> | undefined;
-      } else {
-        // Pattern: (filePath, defaultValue, cls?) - return default value with event methods
-        if (defaultValueOrCls !== undefined) {
-          // Create a safe copy of the default value and attach event methods
-          const defaultWithEvents =
-            typeof defaultValueOrCls === "object" && defaultValueOrCls !== null
-              ? this.safeObjectCopy(defaultValueOrCls as Record<string, unknown>)
-              : defaultValueOrCls;
-
-          if (typeof defaultWithEvents === "object" && defaultWithEvents !== null) {
-            this.attachEventMethods(defaultWithEvents as Record<string, unknown>, absolutePath);
-          }
-
-          return defaultWithEvents as C extends ClassConstructor<infer T>
-            ? WithConfigEvents<T> | WithConfigEvents<R> | undefined
-            : WithConfigEvents<R> | undefined;
-        }
-
-        return undefined as C extends ClassConstructor<infer T>
-          ? WithConfigEvents<T> | WithConfigEvents<R> | undefined
-          : WithConfigEvents<R> | undefined;
-      }
-    }
-
-    // Setup file watcher
-    this.setupFileWatcher(absolutePath, cls, options, true);
-
-    return config as C extends ClassConstructor<infer T>
-      ? WithConfigEvents<T> | WithConfigEvents<R> | undefined
-      : WithConfigEvents<R> | undefined;
+    });
   }
 
   /*****************************************************************************************
    *                                   PRIVATE METHODS                                     *
    *****************************************************************************************/
+
+  /**
+   * Wraps a public getter invocation so validation failures participate in `collectErrors()` scopes.
+   * Only the outermost getter frame records into `this.collector`.
+   * @template T - Return type of the getter.
+   * @param fn - The getter implementation body.
+   * @returns The getter result, or `undefined` when an error was collected.
+   */
+  private guard<T>(fn: () => T): T {
+    this.guardDepth++;
+    try {
+      return fn();
+    } catch (error: unknown) {
+      if (this.collector !== null && error instanceof EnvValidationError) {
+        if (this.guardDepth === 1) {
+          this.collector.push(...error.errors);
+          return undefined as unknown as T;
+        }
+      }
+      throw error;
+    } finally {
+      this.guardDepth--;
+    }
+  }
 
   private getErrorMessage(error: unknown) {
     return error instanceof Error ? error.message : String(error);
@@ -845,15 +1163,211 @@ export class EnvGetterService implements OnModuleDestroy {
   }
 
   /**
-   * Logs an error message in red and throws an error.
-   * @param message - The error message to display.
+   * Throws an `EnvValidationError` for synchronous validation failures.
+   * @param message - The validation error message.
+   * @throws {EnvValidationError} Always throws; never returns.
+   * @private
+   */
+  private fail(message: string): never {
+    throw new EnvValidationError([message]);
+  }
+
+  /**
+   * Terminates execution from inside an asynchronous watcher callback when `breakOnError` is `true`.
+   * Kept as a dedicated method so tests can spy on it.
+   * @param error - The error to throw as an uncaught exception.
    * @throws {Error} Always throws; never returns.
    * @private
    */
-  private stopProcess(message: string): never {
-    // eslint-disable-next-line no-console
-    console.error(`\x1b[31m${message}\x1b[0m`);
-    throw new Error(message);
+  private terminate(error: Error): never {
+    throw error;
+  }
+
+  /**
+   * Emits both the per-file `'updated:<filePath>'` event and the global `'updated'` event.
+   * The reload has already succeeded at this point, so an exception thrown by a listener is
+   * logged rather than reported as a failed re-read (and never triggers `breakOnError`).
+   * @param event - The update event payload.
+   * @private
+   */
+  private emitUpdated(event: ConfigUpdatedEvent): void {
+    try {
+      this.events.emit(`updated:${event.filePath}`, event);
+      this.events.emit("updated", event);
+    } catch (error: unknown) {
+      this.logger.error(
+        `An 'updated' listener for config file '${event.filePath}' threw: ${this.getErrorMessage(error)}`,
+      );
+    }
+  }
+
+  /**
+   * Emits the per-file `'error:<filePath>'` event, the global `'error'` event (when listeners exist),
+   * and logs to Nest's `Logger` when neither has a listener.
+   * @param event - The error event payload.
+   * @private
+   */
+  private emitError(event: ConfigErrorEvent): void {
+    const perFileEvent = `error:${event.filePath}`;
+    const hadPerFileListener = this.events.listenerCount(perFileEvent) > 0;
+    this.events.emit(perFileEvent, event);
+
+    const hadGlobalListener = this.events.listenerCount("error") > 0;
+    if (hadGlobalListener) {
+      this.events.emit("error", event);
+    }
+
+    if (!hadPerFileListener && !hadGlobalListener) {
+      this.logger.error(event.error.message);
+    }
+  }
+
+  /**
+   * Parses and optionally class-validates a JSON object from an environment variable string.
+   * @template R - Expected return type when no class constructor is provided.
+   * @template C - Optional class constructor type.
+   * @param envName - Environment variable name.
+   * @param envVal - Raw environment variable string value.
+   * @param cls - Optional class constructor for validation.
+   * @returns The parsed (and optionally instantiated) object.
+   * @private
+   */
+  private parseObjectFromEnvValue<R = unknown, C extends ClassConstructor<unknown> | undefined = undefined>(
+    envName: string,
+    envVal: string,
+    cls?: C,
+  ): C extends ClassConstructor<infer T> ? T : R {
+    const baseErrorMessage = `Cannot parse object from variable '${envName}'. Error:`;
+    let parsedObj: Record<string, unknown>;
+
+    try {
+      parsedObj = this.deepSanitize(JSON.parse(envVal));
+    } catch (error: unknown) {
+      this.fail(`${baseErrorMessage} ${this.sanitizeJsonError(error)}`);
+    }
+
+    if (!cls) return parsedObj as C extends ClassConstructor<infer T> ? T : R;
+
+    try {
+      return new cls(parsedObj) as C extends ClassConstructor<infer T> ? T : R;
+    } catch (error: unknown) {
+      this.fail(`${baseErrorMessage} ${this.getErrorMessage(error)}`);
+    }
+  }
+
+  /**
+   * Parses and optionally validates a JSON array from an environment variable string.
+   * @template R - Expected element or tuple type.
+   * @param envName - Environment variable name.
+   * @param envVal - Raw environment variable string value.
+   * @param validate - Optional element validator callback.
+   * @param getterName - Public getter name used in validator-misuse messages.
+   * @returns The parsed and validated array.
+   * @private
+   */
+  private parseArrayFromEnvValue<R = unknown>(
+    envName: string,
+    envVal: string,
+    validate: ArrayValidatorType<R> | undefined,
+    getterName: ArrayGetterName,
+  ): R extends unknown[] ? R : R[] {
+    const baseErrorMessage = `Cannot parse an array from variable '${envName}'. Error:`;
+    let parsedArray: unknown[];
+
+    try {
+      parsedArray = this.deepSanitize(JSON.parse(envVal));
+    } catch (error: unknown) {
+      this.fail(`${baseErrorMessage} ${this.sanitizeJsonError(error)}`);
+    }
+
+    if (!Array.isArray(parsedArray)) this.fail(`'${envName}' must be a stringified array`);
+
+    if (typeof validate === "function") {
+      this.validateArrayElements(envName, parsedArray, validate, false, getterName);
+    }
+
+    return parsedArray as R extends unknown[] ? R : R[];
+  }
+
+  /**
+   * Runs an array validator function across each element of an array.
+   * @template R - Expected element or tuple type.
+   * @param envName - Environment variable name.
+   * @param arr - Array to validate.
+   * @param validate - Validator callback.
+   * @param isDefault - Whether `arr` is the caller-supplied default value.
+   * @param getterName - Public getter name used in validator-misuse messages.
+   * @private
+   */
+  private validateArrayElements<R = unknown>(
+    envName: string,
+    arr: unknown[],
+    validate: ArrayValidatorType<R>,
+    isDefault: boolean,
+    getterName: ArrayGetterName,
+  ): void {
+    arr.forEach((el, i) => {
+      const result = validate(el, i, arr as R extends unknown[] ? R : R[]);
+
+      if (!["boolean", "string"].includes(typeof result) || result === "") {
+        this.fail(
+          `The validation func of EnvGetterService.${getterName}('${envName}') must return a boolean or non-empty string.`,
+        );
+      }
+
+      if (result === false || (typeof result === "string" && result)) {
+        if (isDefault) {
+          const detail = typeof result === "string" ? result : `'${envName}[${i}]' failed validation`;
+          this.fail(`The default value for '${envName}' failed validation: ${detail}`);
+        } else {
+          this.fail(typeof result === "string" ? result : `'${envName}[${i}]' failed validation`);
+        }
+      }
+    });
+  }
+
+  /**
+   * Validates and resolves the list separator from `ListOptions`.
+   * @param envName - Environment variable name.
+   * @param options - Optional list options.
+   * @returns The validated non-empty separator string.
+   * @private
+   */
+  private resolveListSeparator(envName: string, options?: ListOptions): string {
+    const separator = options?.separator ?? ",";
+    if (typeof separator !== "string" || separator.length === 0) {
+      return this.fail(`The separator for '${envName}' must be a non-empty string`);
+    }
+    return separator;
+  }
+
+  /**
+   * Splits a raw string by `separator`, trims each item, rejects empty items, and checks `allowedValues`.
+   * @template T - String or literal union type.
+   * @param envName - Environment variable name.
+   * @param rawVal - Raw environment variable string.
+   * @param separator - Non-empty separator string.
+   * @param allowedValues - Optional list of allowed item values.
+   * @returns Array of validated list items.
+   * @private
+   */
+  private parseListItems<T extends string>(
+    envName: string,
+    rawVal: string,
+    separator: string,
+    allowedValues?: readonly T[],
+  ): T[] {
+    const items = rawVal.split(separator).map((item) => item.trim());
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i] as string;
+      if (item === "") {
+        return this.fail(`Variable '${envName}' contains an empty list item at index ${i}`);
+      }
+      if (allowedValues?.length) {
+        this.checkIfEnvHasAllowedValue(envName, item, allowedValues);
+      }
+    }
+    return items as T[];
   }
 
   /**
@@ -864,13 +1378,13 @@ export class EnvGetterService implements OnModuleDestroy {
    * Note: `isEnvSet()` retains pure-existence semantics (hasOwnProperty) regardless of value.
    * @param envName - The name of the environment variable to check.
    * @returns `true` if the environment variable exists and is non-empty.
-   * @throws {Error} If the variable is missing or set-but-empty.
+   * @throws {EnvValidationError} If the variable is missing or set-but-empty.
    * @private
    */
   private checkEnvExisting(envName: string): boolean | never {
-    const value = process.env[envName];
-    if (value === undefined) this.stopProcess(`Missing '${envName}' environment variable`);
-    if (value === "") this.stopProcess(`Variable '${envName}' is set but empty`);
+    const value = this.source[envName];
+    if (value === undefined) this.fail(`Missing '${envName}' environment variable`);
+    if (value === "") this.fail(`Variable '${envName}' is set but empty`);
     return true;
   }
 
@@ -883,23 +1397,23 @@ export class EnvGetterService implements OnModuleDestroy {
    * @param envName - The name of the environment variable.
    * @param envVal - The current value of the environment variable.
    * @param allowedValues - An array of allowed values for the variable.
-   * @throws {Error} If `envVal` is not in the allowed list.
+   * @throws {EnvValidationError} If `envVal` is not in the allowed list.
    * @private
    */
-  private checkIfEnvHasAllowedValue(envName: string, envVal: string, allowedValues: string[]): void | never {
+  private checkIfEnvHasAllowedValue(envName: string, envVal: string, allowedValues: readonly string[]): void | never {
     if (!allowedValues.includes(envVal))
-      this.stopProcess(`Variable '${envName}' can be only one of: [${allowedValues}], but received '${envVal}'`);
+      this.fail(`Variable '${envName}' can be only one of: [${allowedValues}], but received '${envVal}'`);
   }
 
   /**
    * Resolves a file path to an absolute path.
    * - Without `configBaseDir`: absolute paths pass through; relative paths resolve from `cwd`.
    * - With `configBaseDir`: the resolved path MUST remain inside that directory tree or
-   *   `stopProcess` is called (prevents path traversal).
+   *   `fail` is called (prevents path traversal).
    *
    * **Security note:** `filePath` must never be derived from untrusted input (same contract
    * as `fs.readFileSync`). When `configBaseDir` is set, traversal attempts are caught and
-   * logged as fatal errors.
+   * thrown as validation errors.
    * @param filePath - The file path to resolve.
    * @returns The absolute file path.
    * @private
@@ -909,7 +1423,7 @@ export class EnvGetterService implements OnModuleDestroy {
       const base = resolve(this.options.configBaseDir);
       const p = resolve(base, filePath);
       if (p !== base && !p.startsWith(base + sep)) {
-        this.stopProcess(`Config file path '${filePath}' escapes configBaseDir '${base}'`);
+        this.fail(`Config file path '${filePath}' escapes configBaseDir '${base}'`);
       }
       return p;
     }
@@ -924,20 +1438,19 @@ export class EnvGetterService implements OnModuleDestroy {
    * - Updates the cache with the parsed config.
    * - If an instance already exists in cache, updates its properties instead of creating a new instance (preserves references).
    * @template R - The expected type of the parsed config.
+   * @template C - The class constructor type (if provided).
    * @param filePath - The absolute path to the config file.
    * @param cls - (Optional) A class constructor to validate and instantiate the parsed config.
-   * @param isInitialLoad - Whether this is the initial load (true) or a re-parse (false). Events are only emitted on re-parse.
-   * @param breakOnError - Whether to stop the process on errors. Only applies when isInitialLoad is false.
-   * @param isOptional - Whether this is for an optional config file. If true, file reading and JSON parsing errors are thrown without crashing the process, but validation errors still crash the process.
+   * @param isInitialLoad - Whether this is the initial load (true) or a re-parse (false).
+   * @param isOptional - Whether this is for an optional config file on initial load.
    * @returns The parsed config, optionally instantiated as an instance of `cls`.
-   * @throws {Error} If the file cannot be read, parsed, or validated (on initial load or if breakOnError is true). For optional configs, only validation errors throw, other errors are re-thrown.
+   * @throws {Error} If the file cannot be read, parsed, or validated.
    * @private
    */
   private readAndParseConfigFile<R = unknown, C extends ClassConstructor<unknown> | undefined = undefined>(
     filePath: string,
     cls?: C,
     isInitialLoad: boolean = true,
-    breakOnError: boolean = true,
     isOptional: boolean = false,
   ): C extends ClassConstructor<infer T> ? T : R {
     const baseErrorMessage = `Cannot read config from file '${filePath}'.`;
@@ -947,10 +1460,11 @@ export class EnvGetterService implements OnModuleDestroy {
       fileContent = readFileSync(filePath, "utf-8");
     } catch (error: unknown) {
       const err = error instanceof Error ? error : new Error(this.getErrorMessage(error));
-      if ((isInitialLoad || breakOnError) && !isOptional) {
-        this.stopProcess(`${baseErrorMessage} Error reading file: ${err.message}`);
+      const fullMessage = `${baseErrorMessage} Error reading file: ${err.message}`;
+      if (isInitialLoad && !isOptional) {
+        this.fail(fullMessage);
       }
-      throw err;
+      throw new Error(fullMessage);
     }
 
     let parsedConfig: Record<string, unknown>;
@@ -958,13 +1472,13 @@ export class EnvGetterService implements OnModuleDestroy {
       parsedConfig = this.deepSanitize(JSON.parse(fileContent));
     } catch (error: unknown) {
       const safeMessage = this.sanitizeJsonError(error);
-      if ((isInitialLoad || breakOnError) && !isOptional) {
-        this.stopProcess(`${baseErrorMessage} ${safeMessage}`);
+      const fullMessage = `${baseErrorMessage} ${safeMessage}`;
+      if (isInitialLoad && !isOptional) {
+        this.fail(fullMessage);
       }
       // Deliberately NOT preserving the cause: the original SyntaxError embeds a raw fragment
       // of the file content, and this error reaches consumers via the watcher `error:<path>` event.
-      // eslint-disable-next-line preserve-caught-error
-      throw new Error(safeMessage);
+      throw new Error(fullMessage);
     }
 
     if (!cls) {
@@ -1040,11 +1554,11 @@ export class EnvGetterService implements OnModuleDestroy {
       }
     } catch (error: unknown) {
       const err = error instanceof Error ? error : new Error(this.getErrorMessage(error));
-      // Create a proper validation error for optional configs to identify it later
-      const validationError = new Error(`Validation failed: ${err.message}`);
-      // Always crash on validation errors, even for optional configs
-      if (isInitialLoad || breakOnError) {
-        this.stopProcess(`${baseErrorMessage} Validation failed: ${err.message}`);
+      const fullMessage = `${baseErrorMessage} Validation failed: ${err.message}`;
+      const validationError = new Error(fullMessage);
+      // Always fail on validation errors during initial load, even for optional configs
+      if (isInitialLoad) {
+        this.fail(fullMessage);
       }
       throw validationError;
     }
@@ -1055,9 +1569,9 @@ export class EnvGetterService implements OnModuleDestroy {
    * - Watches for file changes and automatically re-reads and updates the cached config.
    * - Applies debouncing to avoid excessive re-reads.
    * - Re-establishes the watcher after each successful update (handles Vault atomic-replace).
-   * - On file deletion: emits `error:<path>`, then sets up a pending parent-dir watcher so
+   * - On file deletion: emits `error:<path>` and global `error`, then sets up a pending parent-dir watcher so
    *   recreation resumes updates (E3 fix).
-   * - Emits `updated:<path>` or `error:<path>` events on re-parse.
+   * - Emits `updated:<path>` / `updated` or `error:<path>` / `error` events on re-parse.
    * @param filePath - The absolute path to the config file.
    * @param cls - (Optional) A class constructor to validate and instantiate the parsed config.
    * @param options - File watcher configuration options.
@@ -1073,7 +1587,7 @@ export class EnvGetterService implements OnModuleDestroy {
     const watcherOptions: Required<FileWatcherOptions> = {
       enabled: options?.enabled ?? true,
       debounceMs: options?.debounceMs ?? 350,
-      breakOnError: options?.breakOnError ?? true,
+      breakOnError: options?.breakOnError ?? false,
     };
 
     if (!watcherOptions.enabled) return;
@@ -1105,13 +1619,13 @@ export class EnvGetterService implements OnModuleDestroy {
             watcher.close();
             this.fileWatchers.delete(filePath);
             this.setupPendingFileWatcher(filePath, cls, options, isOptional);
-            this.events.emit(`error:${filePath}`, errorEvent);
+            this.emitError(errorEvent);
             return;
           }
 
           try {
-            // Re-parse the config (isInitialLoad = false, with breakOnError setting)
-            this.readAndParseConfigFile(filePath, cls, false, watcherOptions.breakOnError, isOptional);
+            // Re-parse the config (isInitialLoad = false)
+            this.readAndParseConfigFile(filePath, cls, false, isOptional);
 
             // Close the old watcher
             watcher.close();
@@ -1119,22 +1633,21 @@ export class EnvGetterService implements OnModuleDestroy {
 
             // Re-establish the watcher to handle file replacement scenarios (e.g., Vault agent)
             this.setupFileWatcher(filePath, cls, options, isOptional);
-
-            // Emit file-specific success event
-            const event: ConfigUpdatedEvent = {
-              filePath,
-              timestamp: Date.now(),
-            };
-            this.events.emit(`updated:${filePath}`, event);
           } catch (error: unknown) {
-            // Emit file-specific error event
+            const err = error instanceof Error ? error : new Error(String(error));
             const errorEvent: ConfigErrorEvent = {
               filePath,
-              error: error instanceof Error ? error : new Error(String(error)),
+              error: err,
               timestamp: Date.now(),
             };
-            this.events.emit(`error:${filePath}`, errorEvent);
+            this.emitError(errorEvent);
+            if (watcherOptions.breakOnError) {
+              this.terminate(err);
+            }
+            return;
           }
+
+          this.emitUpdated({ filePath, timestamp: Date.now() });
         }, watcherOptions.debounceMs);
       }
     });
@@ -1144,7 +1657,7 @@ export class EnvGetterService implements OnModuleDestroy {
 
   /**
    * Watches the parent directory for a not-yet-existing file.
-   * Once the target file appears, loads it, emits `updated:<path>`, closes this watcher,
+   * Once the target file appears, loads it, emits `updated:<path>` and `updated`, closes this watcher,
    * and establishes a normal file watcher.
    * If the parent directory doesn't exist, this is a no-op (documented limitation).
    * @param filePath - The absolute path to the config file that does not exist yet.
@@ -1162,7 +1675,7 @@ export class EnvGetterService implements OnModuleDestroy {
     const watcherOptions: Required<FileWatcherOptions> = {
       enabled: options?.enabled ?? true,
       debounceMs: options?.debounceMs ?? 350,
-      breakOnError: options?.breakOnError ?? true,
+      breakOnError: options?.breakOnError ?? false,
     };
 
     if (!watcherOptions.enabled) return;
@@ -1190,18 +1703,24 @@ export class EnvGetterService implements OnModuleDestroy {
         if (!existsSync(filePath)) return; // Not yet created
 
         try {
-          this.readAndParseConfigFile(filePath, cls, false, watcherOptions.breakOnError, isOptional);
+          this.readAndParseConfigFile(filePath, cls, false, isOptional);
           pending.close();
           this.pendingWatchers.delete(filePath);
           this.setupFileWatcher(filePath, cls, options, isOptional);
-          this.events.emit(`updated:${filePath}`, { filePath, timestamp: Date.now() } satisfies ConfigUpdatedEvent);
         } catch (error: unknown) {
-          this.events.emit(`error:${filePath}`, {
+          const err = error instanceof Error ? error : new Error(String(error));
+          this.emitError({
             filePath,
-            error: error instanceof Error ? error : new Error(String(error)),
+            error: err,
             timestamp: Date.now(),
           } satisfies ConfigErrorEvent);
+          if (watcherOptions.breakOnError) {
+            this.terminate(err);
+          }
+          return;
         }
+
+        this.emitUpdated({ filePath, timestamp: Date.now() });
       }, watcherOptions.debounceMs);
     });
 

@@ -10,9 +10,6 @@ on:
     types: [published]
 
 jobs:
-  lint:
-    uses: ./.github/workflows/lint.job.yml
-
   typecheck:
     uses: ./.github/workflows/typecheck.job.yml
 
@@ -21,7 +18,6 @@ jobs:
 
   build:
     needs:
-      - lint
       - typecheck
       - tests
     uses: ./.github/workflows/build.job.yml

@@ -136,7 +136,6 @@ function expandVariables(
     } else {
       // Variable not found - leave as empty string
       if (!quiet) {
-        // eslint-disable-next-line no-console
         console.warn(`[env-parser] Warning: Variable '${varName}' is not defined`);
       }
       replacement = "";

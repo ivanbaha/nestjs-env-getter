@@ -3,7 +3,7 @@ module.exports = {
   rootDir: "src",
   testRegex: ".*\\.spec\\.ts$",
   transform: {
-    ".+\\.ts$": "ts-jest",
+    ".+\\.ts$": ["<rootDir>/test-utils/ts-jest-transformer.cjs", { compiler: "ts-compiler" }],
   },
   collectCoverageFrom: ["**/*.ts"],
   testEnvironment: "node",

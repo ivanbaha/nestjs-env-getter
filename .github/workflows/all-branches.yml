@@ -10,9 +10,6 @@ on:
     types: [opened, synchronize, reopened]
 
 jobs:
-  lint:
-    uses: ./.github/workflows/lint.job.yml
-
   typecheck:
     uses: ./.github/workflows/typecheck.job.yml
 

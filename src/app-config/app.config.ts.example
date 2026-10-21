@@ -1,46 +1,47 @@
 import { Injectable } from "@nestjs/common";
-import { EnvGetterService } from "nestjs-env-getter";
+import { EnvConfig } from "nestjs-env-getter";
+// import { EnvGetterService, WithConfigEvents } from "nestjs-env-getter";
 
 @Injectable()
-export class AppConfig {
-  // declare your config properties here, for example:
+export class AppConfig extends EnvConfig {
+  // Declare your config properties as field initializers with full type inference:
 
-  // readonly port: number;
-  // readonly mongoConnectionString: string;
-  // readonly optionalConfigBoolean?: boolean;
+  // readonly port = this.envGetter.getOptionalNumericEnv("PORT", 3000);
+  // readonly nodeEnv = this.envGetter.getRequiredEnv("NODE_ENV", [
+  //   "development",
+  //   "staging",
+  //   "production",
+  // ]); // inferred as "development" | "staging" | "production"
+  // readonly mongoConnectionString = this.envGetter.getRequiredEnv("MONGO_CONNECTION_STRING");
+  // readonly optionalConfigBoolean = this.envGetter.getOptionalBooleanEnv("OPTIONAL_CONFIG_BOOLEAN");
+  // readonly testConfig = this.envGetter.getOptionalConfigFromFile(
+  //   "configs/test-configs.json",
+  //   { testConfigStringFromFile: "default-value" },
+  //   TestConfig,
+  // );
 
-  constructor(
-    protected readonly envGetter: EnvGetterService,
-    // You can inject additional providers that were registered in AppConfigModule
-    // For example:
-    // private readonly databaseService: DatabaseService,
-    // private readonly externalApiClient: ExternalApiClient,
-  ) {
-    // initialize your config properties here, for example:
-
-    // this.port = this.envGetter.getOptionalNumericEnv("PORT", 3000);
-    // this.mongoConnectionString = this.envGetter.getRequiredEnv("MONGO_CONNECTION_STRING");
-    // this.optionalConfigBoolean = this.envGetter.getOptionalBooleanEnv("OPTIONAL_CONFIG_BOOLEAN");
-    // this.testConfig = this.envGetter.getOptionalConfigFromFile(
-    //   'configs/test-configs.json',
-    //   { testConfigStringFromFile: 'default-value' },
-    //   TestConfig,
-    // );
-
-    // You can use injected providers to initialize config values:
-    // this.dynamicPort = this.databaseService.getRecommendedPort();
-    // this.apiEndpoint = this.externalApiClient.getBaseUrl();
-  }
+  // If a field depends on another injected provider, assign it in the constructor body after super():
+  // readonly dynamicConfig: WithConfigEvents<TestConfig>;
+  //
+  // constructor(
+  //   envGetter: EnvGetterService,
+  //   private readonly configPaths: ConfigPathsService,
+  // ) {
+  //   super(envGetter);
+  //   this.dynamicConfig = this.envGetter.getRequiredConfigFromFile(
+  //     this.configPaths.getTestConfigPath(),
+  //     TestConfig,
+  //   );
+  // }
 }
 
-// example of validation class for getting configs from file
+// Example of a validation class for loading configs from a JSON file:
 // class TestConfig {
 //   testConfigStringFromFile: string;
-
-//   // Used by EnvGetterService to validate the loaded config
+//
 //   constructor(data: any) {
-//     if (!data.testConfigStringFromFile || typeof data.testConfigStringFromFile !== 'string') {
-//       throw new Error('testConfigStringFromFile is required and must be a string');
+//     if (!data.testConfigStringFromFile || typeof data.testConfigStringFromFile !== "string") {
+//       throw new Error("testConfigStringFromFile is required and must be a string");
 //     }
 //     this.testConfigStringFromFile = data.testConfigStringFromFile;
 //   }

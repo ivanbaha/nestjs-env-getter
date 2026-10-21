@@ -1,63 +1,122 @@
-import { Injectable } from '@nestjs/common';
-// Import the EnvGetterService from the nestjs-env-getter library
-import { EnvGetterService, WithConfigEvents, CronSchedule } from 'nestjs-env-getter';
+import { Injectable, Logger } from '@nestjs/common';
+import { EnvConfig, EnvGetterService, WithConfigEvents } from 'nestjs-env-getter';
 import { AppConfigOptionsService } from './app-config-options.service';
 
 @Injectable()
-export class AppConfig {
-  readonly port: number;
-  readonly nodeEnv: string;
-  readonly isNodeEnvSet: boolean;
+export class AppConfig extends EnvConfig {
+  private readonly logger = new Logger(AppConfig.name);
 
-  mongoConfigs: WithConfigEvents<MongoCredentials>;
+  readonly port = this.envGetter.getRequiredNumericEnv('PORT');
+  // Inferred type: 'development' | 'staging' | 'production' | 'test' (GET-1 / EX-4 / EX-5)
+  readonly nodeEnv = this.envGetter.getRequiredEnv('NODE_ENV', ['development', 'staging', 'production', 'test']);
+  readonly isNodeEnvSet = this.envGetter.isEnvSet('NODE_ENV');
+
+  readonly testConfigString = this.envGetter.getRequiredEnv('TEST_CONFIG_STRING');
+  readonly testConfigNumber = this.envGetter.getRequiredNumericEnv('TEST_CONFIG_NUMBER');
+  readonly testConfigBoolean = this.envGetter.getRequiredBooleanEnv('TEST_CONFIG_BOOLEAN');
+  readonly optionalLogLevel = this.envGetter.getOptionalEnv('LOG_LEVEL');
+  readonly optionalLogLevelWithDefault = this.envGetter.getOptionalEnv('LOG_LEVEL_DEFAULTED', 'info');
+  // Inferred type: 'alpha' | 'beta' | undefined (GET-1 / EX-4)
+  readonly optionalStageAllowed = this.envGetter.getOptionalEnv('APP_STAGE', ['alpha', 'beta']);
+  // Inferred type: 'alpha' | 'beta' (non-nullable when default is provided — GET-1 / BUG-2)
+  readonly optionalStageWithDefaultAllowed = this.envGetter.getOptionalEnv('APP_STAGE_DEFAULTED', 'beta', [
+    'alpha',
+    'beta',
+  ]);
+  readonly optionalNumericTimeout = this.envGetter.getOptionalNumericEnv('REQUEST_TIMEOUT_MS', 5_000);
+  readonly optionalBooleanFlag = this.envGetter.getOptionalBooleanEnv('MAINTENANCE_MODE', false);
+
+  readonly apiUrl = this.envGetter.getRequiredURL('API_URL');
+  readonly cdnUrl = this.envGetter.getOptionalURL('CDN_URL', new URL('https://cdn.fallback.example.com'));
+  readonly sessionTtlMs = this.envGetter.getRequiredTimePeriod('SESSION_TTL', 'ms');
+  readonly workerIntervalSeconds = this.envGetter.getOptionalTimePeriod('WORKER_INTERVAL', '30s', 's');
+  // Demonstrates getOptionalTimePeriod(name, numberDefaultMs, resultIn) (EX-5)
+  readonly cacheTtlSeconds = this.envGetter.getOptionalTimePeriod('CACHE_TTL', 60_000, 's');
+  // No-default getOptionalTimePeriod overloads — `number | undefined`
+  readonly gracePeriodMs = this.envGetter.getOptionalTimePeriod('GRACE_PERIOD');
+  readonly gracePeriodSeconds = this.envGetter.getOptionalTimePeriod('GRACE_PERIOD', 's');
+
+  // List getters (GET-5 / EX-5)
+  readonly corsOrigins = this.envGetter.getRequiredList('CORS_ORIGINS');
+  // Inferred type: ('us-east' | 'eu-west' | 'ap-south')[]
+  readonly enabledRegions = this.envGetter.getRequiredList('ENABLED_REGIONS', {
+    allowedValues: ['us-east', 'eu-west', 'ap-south'],
+  });
+  // Inferred type: ('dark-mode' | 'beta-ui' | 'audit-log')[]
+  readonly optionalFeatureFlags = this.envGetter.getOptionalList('OPTIONAL_FEATURE_FLAGS', ['dark-mode', 'beta-ui'], {
+    separator: ';',
+    allowedValues: ['dark-mode', 'beta-ui', 'audit-log'],
+  });
+
+  readonly singleQuotedVal = this.envGetter.getRequiredEnv('SINGLE_QUOTED_VAL');
+  readonly doubleQuotedVal = this.envGetter.getRequiredEnv('DOUBLE_QUOTED_VAL');
+  readonly literalTemplate = this.envGetter.getRequiredEnv('LITERAL_TEMPLATE');
+  readonly privateKey = this.envGetter.getRequiredEnv('PRIVATE_KEY');
+  readonly appName = this.envGetter.getRequiredEnv('APP_NAME');
+  readonly appTitle = this.envGetter.getRequiredEnv('APP_TITLE');
+  readonly baseUrl = this.envGetter.getRequiredEnv('BASE_URL');
+  readonly databaseUrl = this.envGetter.getRequiredEnv('DATABASE_URL');
+  readonly emptyVal = this.envGetter.getOptionalEnv('EMPTY_VAL', 'fallback');
+
+  readonly allowedDomains = this.envGetter.getRequiredArray<string>('ALLOWED_DOMAINS', (val) => {
+    if (typeof val !== 'string') return 'Each domain must be a string';
+    if (!val.includes('.')) return 'Invalid domain format';
+    return true;
+  });
+
+  // Demonstrates getOptionalArray with a validator that uses (el, index, array) (GET-3 / EX-5)
+  readonly optionalWebhookUrls = this.envGetter.getOptionalArray<string>(
+    'OPTIONAL_WEBHOOK_URLS',
+    ['https://hooks.example.com/default'],
+    (el, index, array) => {
+      if (typeof el !== 'string' || !el.startsWith('https://')) {
+        return `Webhook at index ${index} (of ${array?.length}) must be an https:// URL`;
+      }
+      return true;
+    },
+  );
+
+  readonly complexConfig = this.envGetter.getRequiredObject('COMPLEX_CONFIG', ComplexConfig);
+  readonly simpleConfig = this.envGetter.getRequiredObject('SIMPLE_CONFIG', SimpleConfig);
+  readonly inlineObjectConfig = this.envGetter.getRequiredObject<InlineObjectConfig>('INLINE_OBJECT_CONFIG');
+
+  // Demonstrates getOptionalObject with and without default, and with and without class (GET-2 / EX-5)
+  readonly optionalObjectNoDefault = this.envGetter.getOptionalObject<InlineObjectConfig>('OPTIONAL_OBJECT_JSON');
+  readonly optionalObjectWithClass = this.envGetter.getOptionalObject('OPTIONAL_TYPED_OBJECT_JSON', SimpleConfig);
+  readonly optionalObjectWithDefault = this.envGetter.getOptionalObject<InlineObjectConfig>(
+    'OPTIONAL_OBJECT_WITH_DEFAULT',
+    { retries: 2, strategy: 'linear' },
+  );
+  readonly optionalObjectWithDefaultAndClass = this.envGetter.getOptionalObject(
+    'OPTIONAL_TYPED_OBJECT_WITH_DEFAULT',
+    { name: 'DefaultSvc', version: 1, enabled: false },
+    SimpleConfig,
+  );
+
+  // Demonstrates getOptionalConfigFromFile(path) and (path, cls) on a missing file returning undefined (EX-5)
+  readonly missingOptionalFileRaw =
+    this.envGetter.getOptionalConfigFromFile<OptionalFeatureConfig>('missing-optional.json');
+  readonly missingOptionalFileTyped = this.envGetter.getOptionalConfigFromFile(
+    'missing-optional-typed.json',
+    TestConfig,
+  );
+  readonly optionalConfigFallback = this.envGetter.getOptionalConfigFromFile('optional-feature.json', {
+    enabled: false,
+    mode: 'fallback',
+  });
+
+  readonly mongoConfigs: WithConfigEvents<MongoCredentials>;
   readonly staticMongoConfigsNoWatch: WithConfigEvents<MongoCredentials>;
-
-  readonly testConfigString: string;
-  readonly testConfigNumber: number;
-  readonly testConfigBoolean: boolean;
-  readonly optionalLogLevel: string | undefined;
-  readonly optionalLogLevelWithDefault: string;
-  readonly optionalStageAllowed: string | undefined;
-  readonly optionalStageWithDefaultAllowed: string | undefined;
-  readonly optionalNumericTimeout: number;
-  readonly optionalBooleanFlag: boolean;
-  readonly apiUrl: URL;
-  readonly cdnUrl: URL;
-  readonly sessionTtlMs: number;
-  readonly workerIntervalSeconds: number;
-  // v1.2.0 no-default getOptionalTimePeriod overloads — `number | undefined`
-  readonly gracePeriodMs: number | undefined;
-  readonly gracePeriodSeconds: number | undefined;
-
-  testConfig?: WithConfigEvents<TestConfig>;
-  readonly optionalConfigFallback: WithConfigEvents<OptionalFeatureConfig>;
-
-  readonly singleQuotedVal: string;
-  readonly doubleQuotedVal: string;
-  readonly literalTemplate: string;
-  readonly privateKey: string;
-  readonly appName: string;
-  readonly appTitle: string;
-  readonly baseUrl: string;
-  readonly databaseUrl: string;
-  readonly emptyVal: string;
-  readonly allowedDomains: string[];
-  readonly complexConfig: ComplexConfig;
-  readonly simpleConfig: SimpleConfig;
-  readonly inlineObjectConfig: InlineObjectConfig;
-
-  readonly backupSchedule: CronSchedule;
-  readonly cleanupSchedule?: CronSchedule;
+  readonly testConfig?: WithConfigEvents<TestConfig>;
 
   constructor(
-    protected readonly envGetter: EnvGetterService,
+    envGetter: EnvGetterService,
     private readonly configOptions: AppConfigOptionsService,
   ) {
-    const options = this.configOptions.getConfigOptions();
+    super(envGetter);
 
-    this.port = this.envGetter.getRequiredNumericEnv('PORT');
-    this.nodeEnv = this.envGetter.getRequiredEnv('NODE_ENV', ['development', 'staging', 'production', 'test']);
-    this.isNodeEnvSet = this.envGetter.isEnvSet('NODE_ENV');
+    // Assigned in the constructor body because field initializers run before parameter properties under target >= ES2022 (TS2729).
+    const options = this.configOptions.getConfigOptions();
 
     this.mongoConfigs = this.envGetter.getRequiredConfigFromFile(
       options.mongoCredentialsFile,
@@ -71,27 +130,6 @@ export class AppConfig {
       { enabled: false },
     );
 
-    this.testConfigString = this.envGetter.getRequiredEnv('TEST_CONFIG_STRING');
-    this.testConfigNumber = this.envGetter.getRequiredNumericEnv('TEST_CONFIG_NUMBER');
-    this.testConfigBoolean = this.envGetter.getRequiredBooleanEnv('TEST_CONFIG_BOOLEAN');
-    this.optionalLogLevel = this.envGetter.getOptionalEnv('LOG_LEVEL');
-    this.optionalLogLevelWithDefault = this.envGetter.getOptionalEnv('LOG_LEVEL_DEFAULTED', 'info');
-    this.optionalStageAllowed = this.envGetter.getOptionalEnv('APP_STAGE', ['alpha', 'beta']);
-    this.optionalStageWithDefaultAllowed = this.envGetter.getOptionalEnv('APP_STAGE_DEFAULTED', 'beta', [
-      'alpha',
-      'beta',
-    ]);
-    this.optionalNumericTimeout = this.envGetter.getOptionalNumericEnv('REQUEST_TIMEOUT_MS', 5_000);
-    this.optionalBooleanFlag = this.envGetter.getOptionalBooleanEnv('MAINTENANCE_MODE', false);
-
-    this.apiUrl = this.envGetter.getRequiredURL('API_URL');
-    this.cdnUrl = this.envGetter.getOptionalURL('CDN_URL', new URL('https://cdn.fallback.example.com'));
-    this.sessionTtlMs = this.envGetter.getRequiredTimePeriod('SESSION_TTL', 'ms');
-    this.workerIntervalSeconds = this.envGetter.getOptionalTimePeriod('WORKER_INTERVAL', '30s', 's');
-    // v1.2.0 no-default overloads: return `undefined` when GRACE_PERIOD is unset/empty
-    this.gracePeriodMs = this.envGetter.getOptionalTimePeriod('GRACE_PERIOD'); // (name)
-    this.gracePeriodSeconds = this.envGetter.getOptionalTimePeriod('GRACE_PERIOD', 's'); // (name, resultIn)
-
     this.testConfig = this.envGetter.getOptionalConfigFromFile(
       options.testConfigFile,
       { testConfigStringFromFile: 'default-value' },
@@ -99,44 +137,11 @@ export class AppConfig {
       options.fileWatcherOptions,
     );
 
-    this.optionalConfigFallback = this.envGetter.getOptionalConfigFromFile('configs/optional-feature.json', {
-      enabled: false,
-      mode: 'fallback',
-    });
-
     if (this.testConfig) {
       this.testConfig.on('error', (event) => {
-        console.error(`[AppConfig] Error updating config from ${event.filePath}:`, event.error.message);
+        this.logger.error(`[AppConfig] Error updating config from ${event.filePath}: ${event.error.message}`);
       });
     }
-
-    this.singleQuotedVal = this.envGetter.getRequiredEnv('SINGLE_QUOTED_VAL');
-    this.doubleQuotedVal = this.envGetter.getRequiredEnv('DOUBLE_QUOTED_VAL');
-    // v1.2.0: single-quoted values are raw literals — `${APP_NAME}` is NOT interpolated
-    this.literalTemplate = this.envGetter.getRequiredEnv('LITERAL_TEMPLATE');
-    this.privateKey = this.envGetter.getRequiredEnv('PRIVATE_KEY');
-    this.appName = this.envGetter.getRequiredEnv('APP_NAME');
-    this.appTitle = this.envGetter.getRequiredEnv('APP_TITLE');
-    this.baseUrl = this.envGetter.getRequiredEnv('BASE_URL');
-    this.databaseUrl = this.envGetter.getRequiredEnv('DATABASE_URL');
-    this.emptyVal = this.envGetter.getOptionalEnv('EMPTY_VAL', 'fallback');
-
-    this.allowedDomains = this.envGetter.getRequiredArray<string>('ALLOWED_DOMAINS', (val) => {
-      if (typeof val !== 'string') return 'Each domain must be a string';
-      if (!val.includes('.')) return 'Invalid domain format';
-      return true;
-    });
-
-    this.complexConfig = this.envGetter.getRequiredObject('COMPLEX_CONFIG', ComplexConfig);
-    this.simpleConfig = this.envGetter.getRequiredObject('SIMPLE_CONFIG', SimpleConfig);
-    this.inlineObjectConfig = this.envGetter.getRequiredObject('INLINE_OBJECT_CONFIG');
-
-    this.backupSchedule = this.envGetter.getRequiredCron('BACKUP_SCHEDULE');
-    this.cleanupSchedule = this.envGetter.getOptionalCron('CLEANUP_SCHEDULE');
-
-    console.log('[AppConfig] --- All Configs JSON Snapshot ---');
-    console.log(JSON.stringify(this.getGroupedConfigDiagnostics(), null, 2));
-    console.log('[AppConfig] ---------------------------------');
   }
 
   getGroupedConfigDiagnostics(): unknown {
@@ -161,8 +166,14 @@ export class AppConfig {
           optionalBooleanFlag: this.optionalBooleanFlag,
           cdnUrl: this.cdnUrl.toString(),
           workerIntervalSeconds: this.workerIntervalSeconds,
+          cacheTtlSeconds: this.cacheTtlSeconds,
           gracePeriodMs: this.gracePeriodMs,
           gracePeriodSeconds: this.gracePeriodSeconds,
+        },
+        lists: {
+          corsOrigins: this.corsOrigins,
+          enabledRegions: this.enabledRegions,
+          optionalFeatureFlags: this.optionalFeatureFlags,
         },
       },
       parserFeatures: {
@@ -175,27 +186,27 @@ export class AppConfig {
         databaseUrl: this.databaseUrl,
         emptyVal: this.emptyVal,
         allowedDomains: this.allowedDomains,
+        optionalWebhookUrls: this.optionalWebhookUrls,
         complexConfig: this.complexConfig,
         simpleConfig: this.simpleConfig,
         inlineObjectConfig: this.inlineObjectConfig,
-      },
-      cron: {
-        backupSchedule: this.backupSchedule.toString(),
-        backupPrev: this.backupSchedule.getPrevTime()?.toISOString() ?? null,
-        backupNext: this.backupSchedule.getNextTime()?.toISOString() ?? null,
-        cleanupSchedule: this.cleanupSchedule?.toString(),
-        cleanupPrev: this.cleanupSchedule?.getPrevTime()?.toISOString() ?? null,
-        cleanupNext: this.cleanupSchedule?.getNextTime()?.toISOString() ?? null,
+        optionalObjectNoDefault: this.optionalObjectNoDefault,
+        optionalObjectWithClass: this.optionalObjectWithClass,
+        optionalObjectWithDefault: this.optionalObjectWithDefault,
+        optionalObjectWithDefaultAndClass: this.optionalObjectWithDefaultAndClass,
       },
       fileConfigs: {
         mongoConfigs: this.mongoConfigs,
         staticMongoConfigsNoWatch: this.staticMongoConfigsNoWatch,
         testConfig: this.testConfig,
         optionalConfigFallback: this.optionalConfigFallback,
+        missingOptionalFileRaw: this.missingOptionalFileRaw ?? null,
+        missingOptionalFileTyped: this.missingOptionalFileTyped ?? null,
       },
       watchersAndEvents: {
         perConfigEvents: {
           testConfigOnErrorSubscribed: Boolean(this.testConfig),
+          mongoConfigsOnceOffAndDisposableDemonstratedIn: 'DatabaseConnectionService',
         },
         globalEvents: {
           updated: 'subscribed in AppService constructor',
@@ -206,12 +217,9 @@ export class AppConfig {
   }
 }
 
-// Classes for validating configs obtained from files using nestjs-env-getter
-
-class MongoCredentials {
+export class MongoCredentials {
   connectionString: string;
 
-  // Used by EnvGetterService to validate the loaded config
   constructor(data: Record<string, unknown>) {
     if (!data.connectionString || typeof data.connectionString !== 'string') {
       throw new Error('connectionString is required and must be a string');
@@ -220,10 +228,9 @@ class MongoCredentials {
   }
 }
 
-class TestConfig {
+export class TestConfig {
   testConfigStringFromFile: string;
 
-  // Used by EnvGetterService to validate the loaded config
   constructor(data: Record<string, unknown>) {
     if (!data.testConfigStringFromFile || typeof data.testConfigStringFromFile !== 'string') {
       throw new Error('testConfigStringFromFile is required and must be a string');
@@ -232,7 +239,7 @@ class TestConfig {
   }
 }
 
-class ComplexConfig {
+export class ComplexConfig {
   featureEnabled: boolean;
   maxUsers: number;
   apiEndpoint: string;
@@ -257,7 +264,7 @@ class ComplexConfig {
   }
 }
 
-class SimpleConfig {
+export class SimpleConfig {
   name: string;
   version: number;
   enabled: boolean;
@@ -273,12 +280,12 @@ class SimpleConfig {
   }
 }
 
-type OptionalFeatureConfig = {
+export type OptionalFeatureConfig = {
   enabled: boolean;
   mode: string;
 };
 
-type InlineObjectConfig = {
+export type InlineObjectConfig = {
   retries: number;
   strategy: string;
 };

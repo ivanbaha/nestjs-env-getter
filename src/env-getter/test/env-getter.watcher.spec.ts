@@ -1,20 +1,21 @@
 import { existsSync, mkdirSync, rmSync, unlinkSync, writeFileSync } from "fs";
 import { join } from "path";
+import { Logger } from "@nestjs/common";
 
 import { EnvGetterService } from "../env-getter.service";
-import type { FileWatcherOptions } from "../types";
 
 /**
  * Real-filesystem tests for the pending-watcher machinery (P4.1: E2 absent→created,
  * E3 delete→recreate), `configBaseDir` confinement (P1.5), watcher error-event
- * sanitization (P1.2), and `.env` loading via module options (P4.3).
+ * sanitization (P1.2), global events (BUG-1), Logger fallback (ERR-3),
+ * getOptionalConfigFromFile overloads & malformed startup recovery (BUG-3, BUG-4),
+ * and breakOnError semantics (BUG-5).
  *
  * Uses generous debounce-aware timeouts to stay stable on slow CI runners.
  */
 describe("EnvGetterService — pending watchers & module options", () => {
   const tempDir = join(process.cwd(), `temp-pending-watcher-${Date.now()}`);
   const services: EnvGetterService[] = [];
-  let consoleErrorSpy: jest.SpyInstance;
 
   /**
    * Creates a service that skips the implicit .env load and tracks it for cleanup.
@@ -27,19 +28,6 @@ describe("EnvGetterService — pending watchers & module options", () => {
     return service;
   };
 
-  /**
-   * The runtime accepts (filePath, defaultValue, watcherOptions); the public overloads don't.
-   * @param service - The service whose `getOptionalConfigFromFile` to call untyped.
-   * @returns The bound method with the implementation signature.
-   */
-  const getOptionalConfigRaw = (service: EnvGetterService) =>
-    service.getOptionalConfigFromFile.bind(service) as (
-      filePath: string,
-      defaultValue?: unknown,
-      clsOrWatcherOptions?: unknown,
-      watcherOptions?: FileWatcherOptions,
-    ) => Record<string, unknown> | undefined;
-
   const pendingCount = (service: EnvGetterService): number =>
     (service as unknown as { pendingWatchers: Map<string, unknown> }).pendingWatchers.size;
 
@@ -48,16 +36,14 @@ describe("EnvGetterService — pending watchers & module options", () => {
 
   beforeAll(() => {
     mkdirSync(tempDir, { recursive: true });
-    // stopProcess logs in red before throwing; keep test output clean
-    consoleErrorSpy = jest.spyOn(console, "error").mockImplementation();
   });
 
   afterEach(() => {
+    jest.restoreAllMocks();
     services.splice(0).forEach((service) => service.onModuleDestroy());
   });
 
   afterAll(() => {
-    consoleErrorSpy.mockRestore();
     if (existsSync(tempDir)) rmSync(tempDir, { recursive: true, force: true });
   });
 
@@ -66,20 +52,20 @@ describe("EnvGetterService — pending watchers & module options", () => {
       const filePath = join(tempDir, "e2-default.json");
       const service = createService();
 
-      const config = getOptionalConfigRaw(service)(filePath, { val: "default" }, { debounceMs: 100 });
+      const config = service.getOptionalConfigFromFile(filePath, { val: "default" }, { debounceMs: 100 });
 
-      expect(config?.val).toBe("default");
+      expect(config.val).toBe("default");
       expect(pendingCount(service)).toBe(1);
 
       service.events.once(`updated:${filePath}`, () => {
-        expect(config?.val).toBe("fromFile");
+        expect(config.val).toBe("fromFile");
         // Pending watcher must hand off to a normal file watcher
         expect(pendingCount(service)).toBe(0);
         expect(fileWatcherCount(service)).toBe(1);
 
         // The normal watcher must now react to subsequent changes
         service.events.once(`updated:${filePath}`, () => {
-          expect(config?.val).toBe("changed");
+          expect(config.val).toBe("changed");
           done();
         });
         setTimeout(() => writeFileSync(filePath, JSON.stringify({ val: "changed" })), 150);
@@ -116,18 +102,18 @@ describe("EnvGetterService — pending watchers & module options", () => {
         }
       }
 
-      const typedConfig = getOptionalConfigRaw(service)(filePath, { value: "default" }, StrictConfig, {
+      const typedConfig = service.getOptionalConfigFromFile(filePath, { value: "default" }, StrictConfig, {
         debounceMs: 100,
       });
 
       // Invalid content first: validation must fail -> error event, object untouched
       service.events.once(`error:${filePath}`, (event: { error: Error }) => {
         expect(event.error.message).toContain("Validation failed");
-        expect(typedConfig?.value).toBe("default");
+        expect(typedConfig.value).toBe("default");
 
         // Valid content afterwards: pending watcher is still active -> updated fires
         service.events.once(`updated:${filePath}`, () => {
-          expect(typedConfig?.value).toBe("valid-now");
+          expect(typedConfig.value).toBe("valid-now");
           done();
         });
         setTimeout(() => writeFileSync(filePath, JSON.stringify({ value: "valid-now" })), 150);
@@ -140,7 +126,7 @@ describe("EnvGetterService — pending watchers & module options", () => {
       const filePath = join(tempDir, "e2-disabled-default.json");
       const service = createService();
 
-      getOptionalConfigRaw(service)(filePath, { a: 1 }, { enabled: false });
+      service.getOptionalConfigFromFile(filePath, { a: 1 }, { enabled: false });
 
       expect(pendingCount(service)).toBe(0);
     });
@@ -174,7 +160,7 @@ describe("EnvGetterService — pending watchers & module options", () => {
       writeFileSync(filePath, JSON.stringify({ val: "initial" }));
       const service = createService();
 
-      const config = getOptionalConfigRaw(service)(filePath, undefined, { debounceMs: 100 });
+      const config = service.getOptionalConfigFromFile<{ val: string }>(filePath, undefined, { debounceMs: 100 });
       expect(config?.val).toBe("initial");
 
       service.events.once(`error:${filePath}`, (event: { error: Error }) => {
@@ -216,7 +202,7 @@ describe("EnvGetterService — pending watchers & module options", () => {
       writeFileSync(filePath, JSON.stringify({ ok: true }));
       const service = createService();
 
-      getOptionalConfigRaw(service)(filePath, { ok: false }, { debounceMs: 100, breakOnError: false });
+      service.getOptionalConfigFromFile(filePath, { ok: false }, { debounceMs: 100, breakOnError: false });
 
       service.events.once(`error:${filePath}`, (event: { error: Error }) => {
         expect(event.error.message).toContain("Invalid JSON");
@@ -226,6 +212,256 @@ describe("EnvGetterService — pending watchers & module options", () => {
       });
 
       setTimeout(() => writeFileSync(filePath, '{"pass": SuperSecret123}'), 150);
+    }, 10000);
+  });
+
+  describe("global events and Logger fallback (BUG-1 & ERR-3)", () => {
+    it("fires updated:<filePath> then global updated with identical payload", (done) => {
+      const filePath = join(tempDir, "global-updated.json");
+      writeFileSync(filePath, JSON.stringify({ count: 1 }));
+      const service = createService();
+
+      service.getRequiredConfigFromFile<{ count: number }>(filePath, undefined, { debounceMs: 50 });
+
+      const order: string[] = [];
+      let perFilePayload: unknown;
+      let globalPayload: unknown;
+
+      service.events.once(`updated:${filePath}`, (event) => {
+        order.push("per-file");
+        perFilePayload = event;
+      });
+
+      service.events.once("updated", (event) => {
+        order.push("global");
+        globalPayload = event;
+        expect(order).toEqual(["per-file", "global"]);
+        expect(globalPayload).toBe(perFilePayload);
+        done();
+      });
+
+      setTimeout(() => writeFileSync(filePath, JSON.stringify({ count: 2 })), 80);
+    }, 10000);
+
+    it("fires error:<filePath> then global error when global error has a listener, without calling Logger.error", (done) => {
+      const filePath = join(tempDir, "global-error-both.json");
+      writeFileSync(filePath, JSON.stringify({ ok: true }));
+      const service = createService();
+      const loggerErrorSpy = jest.spyOn(Logger.prototype, "error").mockImplementation();
+
+      service.getRequiredConfigFromFile(filePath, undefined, { debounceMs: 50 });
+
+      const order: string[] = [];
+      service.events.once(`error:${filePath}`, () => {
+        order.push("per-file");
+      });
+      service.events.once("error", () => {
+        order.push("global");
+        expect(order).toEqual(["per-file", "global"]);
+        expect(loggerErrorSpy).not.toHaveBeenCalled();
+        done();
+      });
+
+      setTimeout(() => writeFileSync(filePath, "{bad json"), 80);
+    }, 10000);
+
+    it("does not throw unhandled error or call Logger.error when only per-file error listener is attached", (done) => {
+      const filePath = join(tempDir, "per-file-error-only.json");
+      writeFileSync(filePath, JSON.stringify({ ok: true }));
+      const service = createService();
+      const loggerErrorSpy = jest.spyOn(Logger.prototype, "error").mockImplementation();
+
+      const config = service.getRequiredConfigFromFile<{ ok: boolean }>(filePath, undefined, { debounceMs: 50 });
+
+      config.on("error", (event) => {
+        expect(event.error.message).toContain(`Cannot read config from file '${filePath}'.`);
+        expect(loggerErrorSpy).not.toHaveBeenCalled();
+        done();
+      });
+
+      setTimeout(() => writeFileSync(filePath, "{bad json"), 80);
+    }, 10000);
+
+    it("calls Logger.prototype.error once and does not crash when no error listeners are attached", (done) => {
+      const filePath = join(tempDir, "unhandled-error-logger.json");
+      writeFileSync(filePath, JSON.stringify({ ok: true }));
+      const service = createService();
+      const loggerErrorSpy = jest.spyOn(Logger.prototype, "error").mockImplementation();
+
+      service.getRequiredConfigFromFile(filePath, undefined, { debounceMs: 50 });
+
+      setTimeout(() => {
+        writeFileSync(filePath, "{bad json");
+        setTimeout(() => {
+          expect(loggerErrorSpy).toHaveBeenCalledTimes(1);
+          expect(loggerErrorSpy).toHaveBeenCalledWith(
+            expect.stringContaining(`Cannot read config from file '${filePath}'.`),
+          );
+          done();
+        }, 180);
+      }, 80);
+    }, 10000);
+  });
+
+  describe("malformed optional file at startup still registers watcher (BUG-4)", () => {
+    it("returns default at startup when file is malformed, then hot-reloads in place when fixed", (done) => {
+      const filePath = join(tempDir, "bug4-malformed-startup.json");
+      writeFileSync(filePath, "{invalid json");
+      const service = createService();
+
+      const config = service.getOptionalConfigFromFile(filePath, { a: 1 }, { debounceMs: 50 });
+      expect(config.a).toBe(1);
+      expect(fileWatcherCount(service)).toBe(1);
+
+      config.once("updated", () => {
+        expect(config.a).toBe(2);
+        done();
+      });
+
+      setTimeout(() => writeFileSync(filePath, JSON.stringify({ a: 2 })), 80);
+    }, 10000);
+  });
+
+  describe("breakOnError semantics (BUG-5)", () => {
+    it("defaults breakOnError to false: emits error with 'Cannot read config from file' prefix and does not call terminate", (done) => {
+      const filePath = join(tempDir, "bug5-default-false.json");
+      writeFileSync(filePath, JSON.stringify({ v: 1 }));
+      const service = createService();
+      const terminateSpy = jest.spyOn(service as unknown as { terminate: (err: Error) => never }, "terminate");
+
+      const config = service.getRequiredConfigFromFile<{ v: number }>(filePath, undefined, { debounceMs: 50 });
+
+      config.once("error", (event) => {
+        expect(event.error.message).toMatch(
+          new RegExp(`^Cannot read config from file '.*bug5-default-false\\.json'\\.`),
+        );
+        expect(terminateSpy).not.toHaveBeenCalled();
+        done();
+      });
+
+      setTimeout(() => writeFileSync(filePath, "{corrupt"), 80);
+    }, 10000);
+
+    it("calls terminate after emitting error when breakOnError is true", (done) => {
+      const filePath = join(tempDir, "bug5-break-true.json");
+      writeFileSync(filePath, JSON.stringify({ v: 1 }));
+      const service = createService();
+      const terminateSpy = jest
+        .spyOn(service as unknown as { terminate: (err: Error) => never }, "terminate")
+        .mockImplementation((() => undefined) as unknown as (err: Error) => never);
+
+      const events: string[] = [];
+      const config = service.getRequiredConfigFromFile<{ v: number }>(filePath, undefined, {
+        debounceMs: 50,
+        breakOnError: true,
+      });
+
+      config.once("error", (event) => {
+        events.push("error");
+        expect(event.error.message).toMatch(new RegExp(`^Cannot read config from file '.*bug5-break-true\\.json'\\.`));
+      });
+
+      setTimeout(() => {
+        writeFileSync(filePath, "{corrupt");
+        setTimeout(() => {
+          expect(events).toEqual(["error"]);
+          expect(terminateSpy).toHaveBeenCalledTimes(1);
+          done();
+        }, 180);
+      }, 80);
+    }, 10000);
+
+    it("never calls terminate on file deletion even when breakOnError is true", (done) => {
+      const filePath = join(tempDir, "bug5-delete-break-true.json");
+      writeFileSync(filePath, JSON.stringify({ v: 1 }));
+      const service = createService();
+      const terminateSpy = jest.spyOn(service as unknown as { terminate: (err: Error) => never }, "terminate");
+
+      const config = service.getRequiredConfigFromFile<{ v: number }>(filePath, undefined, {
+        debounceMs: 50,
+        breakOnError: true,
+      });
+
+      config.once("error", (event) => {
+        expect(event.error.message).toContain("was deleted");
+        expect(terminateSpy).not.toHaveBeenCalled();
+        expect(pendingCount(service)).toBe(1);
+        done();
+      });
+
+      setTimeout(() => unlinkSync(filePath), 80);
+    }, 10000);
+
+    it("calls terminate when a pending file appears with invalid content and breakOnError is true", (done) => {
+      const filePath = join(tempDir, "bug5-pending-invalid.json");
+      const service = createService();
+      const terminateSpy = jest
+        .spyOn(service as unknown as { terminate: (err: Error) => never }, "terminate")
+        .mockImplementation((() => undefined) as unknown as (err: Error) => never);
+
+      const config = service.getOptionalConfigFromFile(filePath, { v: 0 }, { debounceMs: 50, breakOnError: true });
+
+      config.once("error", (event) => {
+        expect(event.error.message).toMatch(/^Cannot read config from file '.*bug5-pending-invalid\.json'\./);
+        setTimeout(() => {
+          expect(terminateSpy).toHaveBeenCalledTimes(1);
+          expect(config.v).toBe(0);
+          done();
+        }, 20);
+      });
+
+      setTimeout(() => writeFileSync(filePath, "{corrupt"), 80);
+    }, 10000);
+
+    it("calls terminate for an optional file that becomes malformed when breakOnError is true", (done) => {
+      const filePath = join(tempDir, "bug5-optional-break-true.json");
+      writeFileSync(filePath, JSON.stringify({ v: 1 }));
+      const service = createService();
+      const terminateSpy = jest
+        .spyOn(service as unknown as { terminate: (err: Error) => never }, "terminate")
+        .mockImplementation((() => undefined) as unknown as (err: Error) => never);
+
+      const config = service.getOptionalConfigFromFile(filePath, { v: 0 }, { debounceMs: 50, breakOnError: true });
+      expect(config.v).toBe(1);
+
+      config.once("error", () => {
+        setTimeout(() => {
+          expect(terminateSpy).toHaveBeenCalledTimes(1);
+          expect(config.v).toBe(1);
+          done();
+        }, 20);
+      });
+
+      setTimeout(() => writeFileSync(filePath, "{corrupt"), 80);
+    }, 10000);
+
+    it("does not report a throwing 'updated' listener as a failed re-read, even with breakOnError: true", (done) => {
+      const filePath = join(tempDir, "bug5-throwing-listener.json");
+      writeFileSync(filePath, JSON.stringify({ v: 1 }));
+      const service = createService();
+      const terminateSpy = jest.spyOn(service as unknown as { terminate: (err: Error) => never }, "terminate");
+      const loggerErrorSpy = jest.spyOn(Logger.prototype, "error").mockImplementation();
+      const errorEvents: string[] = [];
+
+      const config = service.getRequiredConfigFromFile<{ v: number }>(filePath, undefined, {
+        debounceMs: 50,
+        breakOnError: true,
+      });
+      config.on("error", (event) => errorEvents.push(event.error.message));
+      config.on("updated", () => {
+        throw new Error("bug in a user listener");
+      });
+
+      setTimeout(() => {
+        writeFileSync(filePath, JSON.stringify({ v: 2 }));
+        setTimeout(() => {
+          expect(config.v).toBe(2);
+          expect(errorEvents).toEqual([]);
+          expect(terminateSpy).not.toHaveBeenCalled();
+          expect(loggerErrorSpy).toHaveBeenCalledWith(expect.stringContaining("bug in a user listener"));
+          done();
+        }, 250);
+      }, 80);
     }, 10000);
   });
 

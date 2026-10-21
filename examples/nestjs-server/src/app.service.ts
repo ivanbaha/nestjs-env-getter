@@ -1,7 +1,7 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
-// Import AppConfig to access configuration values loaded by nestjs-env-getter
-import { AppConfig } from './app.config';
 import { EnvGetterService } from 'nestjs-env-getter';
+import { AppConfig } from './app.config';
+import { TasksService } from './tasks/tasks.service';
 
 type UpdatedEvent = {
   filePath: string;
@@ -18,11 +18,12 @@ type ErrorEvent = {
 export class AppService implements OnModuleInit {
   private readonly logger = new Logger(AppService.name);
 
-  // Inject AppConfig to use environment/config values
   constructor(
     private readonly config: AppConfig,
     private readonly envGetter: EnvGetterService,
+    private readonly tasksService: TasksService,
   ) {
+    // Global 'updated' and 'error' events on envGetter.events (BUG-1 / EX-5)
     this.envGetter.events.on('updated', (event: UpdatedEvent) => {
       this.logger.log(
         `[AppService] Global updated event: ${event.filePath} at ${new Date(event.timestamp).toISOString()}`,
@@ -36,8 +37,6 @@ export class AppService implements OnModuleInit {
       this.logger.error(`[AppService] Error: ${event.error.message}`);
     });
 
-    // Subscribe to the same test-configs.json file from a different place (AppService)
-    // This demonstrates that multiple parts of the app can listen to the same config file
     if (this.config.testConfig) {
       this.config.testConfig.on('updated', (event) => {
         this.logger.log(`[AppService] Config updated: ${event.filePath} at ${new Date(event.timestamp).toISOString()}`);
@@ -69,45 +68,24 @@ export class AppService implements OnModuleInit {
     this.logger.log(`CDN_URL (optional URL): ${this.config.cdnUrl.toString()}`);
     this.logger.log(`SESSION_TTL (required time period in ms): ${this.config.sessionTtlMs}`);
     this.logger.log(`WORKER_INTERVAL (optional time period in s): ${this.config.workerIntervalSeconds}`);
-
-    this.logger.log('--- Custom Parser Examples ---');
-    this.logger.log(`SINGLE_QUOTED_VAL: ${this.config.singleQuotedVal}`);
-    this.logger.log(`DOUBLE_QUOTED_VAL: ${this.config.doubleQuotedVal}`);
-    this.logger.log(`APP_NAME: ${this.config.appName}`);
-    this.logger.log(`APP_TITLE: ${this.config.appTitle}`);
-    this.logger.log(`BASE_URL: ${this.config.baseUrl}`);
-    this.logger.log(`DATABASE_URL: ${this.config.databaseUrl}`);
-    this.logger.log(`EMPTY_VAL: "${this.config.emptyVal}"`);
-    this.logger.log(`ALLOWED_DOMAINS: ${JSON.stringify(this.config.allowedDomains)}`);
-    this.logger.log(`COMPLEX_CONFIG: ${JSON.stringify(this.config.complexConfig, null, 2)}`);
-    this.logger.log(`SIMPLE_CONFIG: ${JSON.stringify(this.config.simpleConfig, null, 2)}`);
-    this.logger.log(`INLINE_OBJECT_CONFIG: ${JSON.stringify(this.config.inlineObjectConfig, null, 2)}`);
-
-    this.logger.log('--- Multiline Variable (RSA Key) ---');
-    this.logger.log(this.config.privateKey);
-    this.logger.log('------------------------------------');
-
-    this.logger.log('--- Cron Schedules ---');
-    this.logger.log(`Previous backup at: ${this.config.backupSchedule.getPrevTime()?.toISOString() || 'N/A'}`);
-    this.logger.log(`Next backup at: ${this.config.backupSchedule.getNextTime()?.toISOString() || 'N/A'}`);
-    if (this.config.cleanupSchedule) {
-      this.logger.log(`Previous cleanup at: ${this.config.cleanupSchedule.getPrevTime()?.toISOString() || 'N/A'}`);
-      this.logger.log(`Next cleanup at: ${this.config.cleanupSchedule.getNextTime()?.toISOString() || 'N/A'}`);
-    }
-    this.logger.log('------------------------------------');
+    this.logger.log(`CACHE_TTL (optional time period with numeric ms default in s): ${this.config.cacheTtlSeconds}`);
+    this.logger.log(`CORS_ORIGINS (required list): ${JSON.stringify(this.config.corsOrigins)}`);
+    this.logger.log(
+      `ENABLED_REGIONS (required list with allowedValues): ${JSON.stringify(this.config.enabledRegions)}`,
+    );
+    this.logger.log(`OPTIONAL_FEATURE_FLAGS (optional list): ${JSON.stringify(this.config.optionalFeatureFlags)}`);
 
     this.logger.log('--- All Configs JSON Snapshot ---');
     this.logger.log(JSON.stringify(this.getGroupedConfigDiagnostics(), null, 2));
     this.logger.log('---------------------------------');
   }
 
-  // Example endpoint value
   getHello(): string {
     return 'Hello World!';
   }
 
-  // Expose config values loaded via nestjs-env-getter
   getTestConfigValue(): unknown {
+    const schedules = this.tasksService.getSchedulesDiagnostics();
     return {
       testConfigString: this.config.testConfigString,
       testConfigNumber: this.config.testConfigNumber,
@@ -124,12 +102,21 @@ export class AppService implements OnModuleInit {
       cdnUrl: this.config.cdnUrl.toString(),
       sessionTtlMs: this.config.sessionTtlMs,
       workerIntervalSeconds: this.config.workerIntervalSeconds,
-      backupSchedule: this.config.backupSchedule.toString(),
-      cleanupSchedule: this.config.cleanupSchedule?.toString(),
+      cacheTtlSeconds: this.config.cacheTtlSeconds,
+      corsOrigins: this.config.corsOrigins,
+      enabledRegions: this.config.enabledRegions,
+      optionalFeatureFlags: this.config.optionalFeatureFlags,
+      backupSchedule: schedules.backupSchedule,
+      cleanupSchedule: schedules.cleanupSchedule,
       allowedDomains: this.config.allowedDomains,
+      optionalWebhookUrls: this.config.optionalWebhookUrls,
       complexConfig: this.config.complexConfig,
       simpleConfig: this.config.simpleConfig,
       inlineObjectConfig: this.config.inlineObjectConfig,
+      optionalObjectNoDefault: this.config.optionalObjectNoDefault,
+      optionalObjectWithClass: this.config.optionalObjectWithClass,
+      optionalObjectWithDefault: this.config.optionalObjectWithDefault,
+      optionalObjectWithDefaultAndClass: this.config.optionalObjectWithDefaultAndClass,
       optionalConfigFallback: this.config.optionalConfigFallback,
       staticMongoConfigsNoWatch: this.config.staticMongoConfigsNoWatch,
       testConfigStringFromFile: this.config.testConfig?.testConfigStringFromFile,
@@ -137,6 +124,9 @@ export class AppService implements OnModuleInit {
   }
 
   getGroupedConfigDiagnostics(): unknown {
-    return this.config.getGroupedConfigDiagnostics();
+    return {
+      ...(this.config.getGroupedConfigDiagnostics() as Record<string, unknown>),
+      cron: this.tasksService.getSchedulesDiagnostics(),
+    };
   }
 }
