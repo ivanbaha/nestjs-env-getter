@@ -1,43 +1,38 @@
 import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
 import { SchedulerRegistry } from '@nestjs/schedule';
 import { CronJob } from 'cron';
-import { AppConfig } from '../app.config';
+import { TasksConfig } from './tasks.config';
 
 @Injectable()
 export class TasksService implements OnModuleDestroy {
   private readonly logger = new Logger(TasksService.name);
 
   constructor(
-    private readonly config: AppConfig,
+    private readonly config: TasksConfig,
     private readonly schedulerRegistry: SchedulerRegistry,
   ) {
     this.initializeScheduledTasks();
   }
 
   private initializeScheduledTasks(): void {
-    // Register backup task with schedule from config
     const backupJob = CronJob.from({
       cronTime: this.config.backupSchedule.toString(),
       onTick: () => this.handleBackupTask(),
     });
     this.schedulerRegistry.addCronJob('backup', backupJob);
     backupJob.start();
-    this.logger.log(`📅 Backup task scheduled: ${this.config.backupSchedule.toString()}`);
+    this.logger.log(`Backup task scheduled: ${this.config.backupSchedule.toString()}`);
 
-    // Register cleanup task only if schedule is configured
-    if (this.config.cleanupSchedule) {
-      const cleanupJob = CronJob.from({
-        cronTime: this.config.cleanupSchedule.toString(),
-        onTick: () => this.handleCleanupTask(),
-      });
-      this.schedulerRegistry.addCronJob('cleanup', cleanupJob);
-      cleanupJob.start();
-      this.logger.log(`📅 Cleanup task scheduled: ${this.config.cleanupSchedule.toString()}`);
-    }
+    const cleanupJob = CronJob.from({
+      cronTime: this.config.cleanupSchedule.toString(),
+      onTick: () => this.handleCleanupTask(),
+    });
+    this.schedulerRegistry.addCronJob('cleanup', cleanupJob);
+    cleanupJob.start();
+    this.logger.log(`Cleanup task scheduled: ${this.config.cleanupSchedule.toString()}`);
   }
 
   onModuleDestroy(): void {
-    // Clean up cron jobs when module is destroyed
     if (this.schedulerRegistry.doesExist('cron', 'backup')) {
       this.schedulerRegistry.deleteCronJob('backup');
     }
@@ -46,28 +41,35 @@ export class TasksService implements OnModuleDestroy {
     }
   }
 
-  private handleBackupTask(): void {
-    const schedule = this.config.backupSchedule;
-    this.logger.log('🔄 Backup task started');
-    this.logger.log(`Next scheduled run: ${schedule.getNextTime()?.toISOString() ?? 'N/A'}`);
+  getSchedulesDiagnostics() {
+    const now = new Date();
+    return {
+      backupSchedule: this.config.backupSchedule.toString(),
+      backupIsMatchingNow: this.config.backupSchedule.isMatching(now),
+      backupPrev: this.config.backupSchedule.getPrevTime(now)?.toISOString() ?? null,
+      backupNext: this.config.backupSchedule.getNextTime(now)?.toISOString() ?? null,
+      cleanupSchedule: this.config.cleanupSchedule.toString(),
+      cleanupIsMatchingNow: this.config.cleanupSchedule.isMatching(now),
+      cleanupPrev: this.config.cleanupSchedule.getPrevTime(now)?.toISOString() ?? null,
+      cleanupNext: this.config.cleanupSchedule.getNextTime(now)?.toISOString() ?? null,
+    };
+  }
 
-    // Your backup logic would go here
-    // For example: database backup, file system backup, etc.
-    this.logger.log('✅ Backup task completed');
+  private handleBackupTask(): void {
+    const now = new Date();
+    const schedule = this.config.backupSchedule;
+    this.logger.log(`Backup task started (matches now: ${schedule.isMatching(now)})`);
+    this.logger.log(`Previous run: ${schedule.getPrevTime(now)?.toISOString() ?? 'N/A'}`);
+    this.logger.log(`Next scheduled run: ${schedule.getNextTime(now)?.toISOString() ?? 'N/A'}`);
+    this.logger.log('Backup task completed');
   }
 
   private handleCleanupTask(): void {
-    if (!this.config.cleanupSchedule) {
-      return;
-    }
-
+    const now = new Date();
     const schedule = this.config.cleanupSchedule;
-    this.logger.log('🧹 Cleanup task started');
-    this.logger.log(`Previous run: ${schedule.getPrevTime()?.toISOString() ?? 'N/A'}`);
-    this.logger.log(`Next scheduled run: ${schedule.getNextTime()?.toISOString() ?? 'N/A'}`);
-
-    // Your cleanup logic would go here
-    // For example: removing old logs, temporary files, etc.
-    this.logger.log('✅ Cleanup task completed');
+    this.logger.log(`Cleanup task started (matches now: ${schedule.isMatching(now)})`);
+    this.logger.log(`Previous run: ${schedule.getPrevTime(now)?.toISOString() ?? 'N/A'}`);
+    this.logger.log(`Next scheduled run: ${schedule.getNextTime(now)?.toISOString() ?? 'N/A'}`);
+    this.logger.log('Cleanup task completed');
   }
 }

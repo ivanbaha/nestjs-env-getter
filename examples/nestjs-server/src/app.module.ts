@@ -1,43 +1,28 @@
+import { join } from 'path';
 import { Module } from '@nestjs/common';
-import { MongooseModule } from '@nestjs/mongoose';
 import { ScheduleModule } from '@nestjs/schedule';
+import { AppConfigModule } from 'nestjs-env-getter';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { AppConfig } from './app.config';
-import { UsersTestModule } from './users-test/users-test.module';
-import { TasksModule } from './tasks/tasks.module';
-// Import the configuration module from the local nestjs-env-getter source
-import { AppConfigModule } from 'nestjs-env-getter';
-import { MongoConnectionService } from './mongo-connection.service';
 import { AppConfigOptionsService } from './app-config-options.service';
+import { DatabaseConnectionService } from './database/database-connection.service';
+import { TasksModule } from './tasks/tasks.module';
 
 @Module({
   imports: [
-    AppConfigModule.forRootAsync({
+    AppConfigModule.forRoot({
       useClass: AppConfig,
       providers: [AppConfigOptionsService],
-      // v1.2.0 module options, forwarded to EnvGetterService:
-      // - envFilePath: which .env file(s) to load at startup (string | string[] | false to opt out)
-      // - configBaseDir: confine getRequired/getOptionalConfigFromFile resolution to this dir;
-      //   any path escaping it terminates the app (path-traversal guard)
       envGetter: {
-        envFilePath: '.env',
-        configBaseDir: process.cwd(),
+        envFilePath: ['example.env', '.env'], // example.env = defaults; an optional local .env overrides (later files win)
+        configBaseDir: join(process.cwd(), 'configs'),
       },
     }),
-
-    // Use AppConfig to provide MongoDB connection string from config file
-    MongooseModule.forRootAsync({
-      imports: [AppConfigModule],
-      useFactory: (config: AppConfig) => ({ uri: config.mongoConfigs.connectionString }),
-      inject: [AppConfig],
-    }),
-
     ScheduleModule.forRoot(),
-    UsersTestModule,
     TasksModule,
   ],
   controllers: [AppController],
-  providers: [AppService, MongoConnectionService],
+  providers: [AppService, DatabaseConnectionService],
 })
 export class AppModule {}

@@ -1,126 +1,91 @@
 # NestJS Server Example
 
-This project demonstrates the **full practical surface** of `nestjs-env-getter` in a real NestJS app:
-
-- `AppConfigModule.forRootAsync({ useClass })`
-- provider injection into config class (`providers` option)
-- v1.2.0 module options via the `envGetter` pass-through (`envFilePath`, `configBaseDir`)
-- all major `EnvGetterService` getters (string/number/boolean/url/time/object/array/cron)
-- required + optional env/config flows (including the no-default `getOptionalTimePeriod` overloads)
-- config-file hot reload + event subscriptions (`updated` and `error`)
-- global config events via `envGetter.events`
+This project demonstrates the **full practical surface** of `nestjs-env-getter` v1.3.0 in a real NestJS app — with **zero external service prerequisites** (no MongoDB or Docker required).
 
 ## Key Features Demonstrated
 
-- **Typed env getters**: required/optional string, numeric, boolean, URL, time period
-- **Validation patterns**: allowed values and custom array validator callback
-- **Object parsing**: class-based object validation and plain JSON object parsing from env
-- **Cron support**: required and optional cron expressions with runtime schedule helpers
-- **JSON file configs**: required and optional file loading with class validation, defaults, and watcher options
-- **Hot reload events**: both per-config subscriptions (`config.on(...)`) and global `EnvGetterService.events`
-- **Dynamic file selection**: `AppConfigOptionsService` switches config filenames by `NODE_ENV`
-- **Module options (v1.2.0)**: `envFilePath` and `configBaseDir` forwarded through `AppConfigModule`'s `envGetter` option
-- **Parser quoting (v1.2.0)**: `LITERAL_TEMPLATE` shows single-quoted values keep `${...}` literal (no interpolation), while double-quoted/unquoted values still expand
+- **`EnvConfig` base class (v1.3.0)**: inline field initializers with full TypeScript literal-union inference (`NODE_ENV`, `APP_STAGE`, `ENABLED_REGIONS`, `OPTIONAL_FEATURE_FLAGS`)
+- **`AppConfigModule.forRoot` & `forFeature` (v1.3.0)**: root `AppConfig` registration plus feature-scoped `TasksConfig` in `TasksModule`
+- **Automatic error aggregation (v1.3.0)**: reports all missing/invalid variables at once via `EnvValidationError`
+- **`@Inject(APP_CONFIG)` alias**: `DatabaseConnectionService` injects `AppConfig` via the `APP_CONFIG` token
+- **All `EnvGetterService` getter families**:
+  - required/optional string (with literal union narrowing), numeric, boolean, URL, time period
+  - `getRequiredList` & `getOptionalList` (comma and custom `;` separator, `allowedValues`)
+  - `getRequiredObject` & `getOptionalObject` (plain JSON and validated class instances, with/without defaults)
+  - `getRequiredArray` & `getOptionalArray` (with `(el, index, array)` element validator)
+  - `getRequiredCron` & `getOptionalCron` (including default cron expression, `isMatching()`, `getPrevTime()`, `getNextTime()`)
+  - `getRequiredConfigFromFile` & `getOptionalConfigFromFile` (relative to `configBaseDir`, with/without defaults and validation classes)
+- **Hot reload & events**: per-file `.on()`, `.once()`, `.off()`, `Disposable.unsubscribe()`, and global `envGetter.events` (`'updated'` and `'error'`)
 
 ## How It Works
 
-### 1. AppConfigOptionsService
-
-`AppConfigOptionsService` provides environment-aware file and watcher settings:
-
-- `NODE_ENV=development` → `configs/mongo-creds.json`
-- `NODE_ENV=staging` → `configs/mongo-creds-staging.json`
-- `NODE_ENV=production` → `configs/mongo-creds-prod.json`
-
-It also centralizes watcher options (`enabled`, `debounceMs`, `breakOnError`).
-
-> All values in `example.env` and `configs/mongo-creds-*.json` are **placeholders for teaching purposes** — never commit real credentials; in production, mount such files from a secret manager (Vault, K8s secrets, etc.).
-
-### 2. AppConfigModule Registration
+### 1. Module Wiring (`src/app.module.ts` & `src/tasks/tasks.module.ts`)
 
 ```typescript
-AppConfigModule.forRootAsync({
+// src/app.module.ts
+AppConfigModule.forRoot({
   useClass: AppConfig,
   providers: [AppConfigOptionsService],
-  // v1.2.0: forwarded to EnvGetterService
   envGetter: {
-    envFilePath: '.env', // string | string[] | false (opt out of the implicit .env load)
-    configBaseDir: process.cwd(), // confine config-file resolution; path traversal is fatal
+    envFilePath: ['example.env', '.env'], // example.env provides defaults; optional local .env overrides
+    configBaseDir: join(process.cwd(), 'configs'),
   },
-});
+}),
+
+// src/tasks/tasks.module.ts
+@Module({
+  imports: [AppConfigModule.forFeature(TasksConfig)],
+  providers: [TasksService],
+})
+export class TasksModule {}
 ```
 
-### 3. AppConfig with All Getter Families
+### 2. `AppConfigOptionsService` (`src/app-config-options.service.ts`)
 
-```typescript
-constructor(
-  private readonly envGetter: EnvGetterService,
-  private readonly optionsService: AppConfigOptionsService,
-) {
-  this.port = this.envGetter.getRequiredNumericEnv('PORT');
-  this.apiUrl = this.envGetter.getRequiredURL('API_URL');
-  this.sessionTtlMs = this.envGetter.getRequiredTimePeriod('SESSION_TTL', 'ms');
-  this.allowedDomains = this.envGetter.getRequiredArray<string>('ALLOWED_DOMAINS');
-  this.backupSchedule = this.envGetter.getRequiredCron('BACKUP_SCHEDULE');
+Injects `EnvGetterService` to read `NODE_ENV` as a narrowed union (`'development' | 'staging' | 'production' | 'test'`) and returns config filenames relative to `configs/` (`mongo-creds.json`, `test-configs.json`, etc.).
 
-  this.mongoConfigs = this.envGetter.getRequiredConfigFromFile(...);
-  this.testConfig = this.envGetter.getOptionalConfigFromFile(...);
-}
-```
+### 3. `AppConfig` & `TasksConfig` (`src/app.config.ts`, `src/tasks/tasks.config.ts`)
+
+Both extend `EnvConfig`, declaring environment-backed fields with concise inline initializers. File-backed fields in `AppConfig` that depend on `AppConfigOptionsService` are initialized in the constructor body after `super(envGetter)`.
 
 ## Endpoints
 
-- `GET /` → basic health response
-- `GET /config` → snapshot of all parsed/validated example values
-- `GET /config/grouped` → same data grouped by feature area (env types, parser, cron, file configs, events)
+- `GET /` → health check (`Hello World!`)
+- `GET /config` → flat snapshot of parsed and validated configuration values
+- `GET /config/grouped` → diagnostics grouped by feature area (`envTypes`, `parserFeatures`, `cron`, `fileConfigs`, `watchersAndEvents`)
+- `GET /db/status` → simulated database connection status (`maskedUri`, `reconnectCount`, `lastReconnectAt`, `lastError`, `firstUpdateReceived`)
 
 ## Try It
 
+No `.env` copy or database container is required — `example.env` is loaded automatically as the base layer:
+
 ```bash
-npm install
-cp example.env .env
-npm run start:dev
+yarn start
 ```
 
-> **Prerequisite:** this example wires up `@nestjs/mongoose`, so a MongoDB instance must be reachable at the connection string in `configs/mongo-creds.json` (default `mongodb://localhost:27017`) for the app to finish booting and start listening. The full `nestjs-env-getter` surface (every getter, file config, cron, and the startup diagnostics snapshot) runs during `AppConfig` construction **before** the Mongo connection, so you'll see it exercised in the logs even without a database. To run one quickly:
->
-> ```bash
-> docker run -d -p 27017:27017 --name mongo mongo:7
-> ```
-
-Then call:
+In another terminal, query the endpoints:
 
 ```bash
 curl http://localhost:3000/config
+curl http://localhost:3000/config/grouped
+curl http://localhost:3000/db/status
 ```
 
-## Testing Different Environments
+### Live Hot-Reload Demo
+
+While the server is running, edit `configs/mongo-creds.json` (for example, change the database name or host) and save the file. Then run:
 
 ```bash
-# Development (default)
-npm run start:dev
-
-# Staging
-NODE_ENV=staging npm run start:dev
-
-# Production
-NODE_ENV=production npm run start:dev
+curl http://localhost:3000/db/status
 ```
 
-## Notes on Other Public APIs
+You will see `reconnectCount` increment, `lastReconnectAt` update, and `firstUpdateReceived: true`.
 
-This example runtime focuses on the `AppConfigModule` path. The library also exposes:
+## Testing
 
-- `EnvGetterModule` (standalone `EnvGetterService` without config-class pattern)
-- `AppConfigModule.forRootAsync({ useFactory, inject })` with `APP_CONFIG` token
+The example includes unit and e2e tests covering the real `AppModule`, live file hot-reload in a temporary directory, `forRootAsync` factory patterns, `forTesting` error aggregation, and plain unit testing of `TasksConfig` without Nest DI:
 
-Minimal snippet for factory mode:
-
-```typescript
-AppConfigModule.forRootAsync({
-  useFactory: (envGetter: EnvGetterService) => ({
-    port: envGetter.getRequiredNumericEnv('PORT'),
-  }),
-  inject: [EnvGetterService],
-});
+```bash
+yarn test
+yarn test:e2e
 ```

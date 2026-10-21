@@ -1,7 +1,5 @@
 #!/usr/bin/env node
 
-/* eslint-disable no-console */
-
 import { copyFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -114,7 +112,7 @@ function updateAppModule(paths) {
   updated = insertConfigModuleCall(updated);
 
   writeFileSync(paths.appModulePath, updated, "utf8");
-  logInfo("Updated src/app.module.ts with AppConfigModule.forRoot({ useClass: AppConfig }).");
+  logInfo("Updated src/app.module.ts with AppConfigModule.forRoot(AppConfig).");
   return true;
 }
 
@@ -194,24 +192,77 @@ function findLastImportIndex(source) {
  * @returns {string} Updated source.
  */
 function insertConfigModuleCall(source) {
-  const importsArrayRegex = /(imports\s*:\s*\[)([\s\S]*?)(\n\s*\])/m;
-  const match = source.match(importsArrayRegex);
+  const openMatch = /imports\s*:\s*\[/.exec(source);
+  const openIndex = openMatch ? openMatch.index + openMatch[0].length - 1 : -1;
+  const closeIndex = openIndex === -1 ? -1 : findMatchingBracket(source, openIndex);
 
-  if (!match) {
+  if (closeIndex === -1) {
     logError("Could not locate the imports array in app.module.ts to add AppConfigModule.");
     process.exit(1);
   }
 
-  const [fullMatch, start, middle, end] = match;
-  const lineIndentMatch = start.match(/^(\s*)imports/m);
-  const lineIndent = lineIndentMatch ? lineIndentMatch[1] : "";
+  const lineStart = source.lastIndexOf("\n", openMatch.index) + 1;
+  const lineIndent = /^[ \t]*/.exec(source.slice(lineStart))[0];
   const entryIndent = `${lineIndent}  `;
-  const insertion = `\n${entryIndent}AppConfigModule.forRoot({ useClass: AppConfig }),`;
+  const entry = "AppConfigModule.forRoot(AppConfig),";
+  const inner = source.slice(openIndex + 1, closeIndex);
 
-  const newMiddle = `${insertion}${middle}`;
-  const replacement = `${start}${newMiddle}${end}`;
+  let newInner;
+  if (inner.trim() === "") {
+    newInner = `\n${entryIndent}${entry}\n${lineIndent}`;
+  } else if (inner.includes("\n")) {
+    newInner = `\n${entryIndent}${entry}${inner}`;
+  } else {
+    newInner = `${entry} ${inner.trimStart()}`;
+  }
 
-  return source.replace(fullMatch, replacement);
+  return `${source.slice(0, openIndex + 1)}${newInner}${source.slice(closeIndex)}`;
+}
+
+/**
+ * Finds the `]` that closes the `[` at `openIndex`, skipping brackets inside strings and comments.
+ * @param {string} source - File contents.
+ * @param {number} openIndex - Index of the opening `[`.
+ * @returns {number} Index of the matching `]`, or -1 when the array is unterminated.
+ */
+function findMatchingBracket(source, openIndex) {
+  let depth = 0;
+  for (let i = openIndex; i < source.length; i++) {
+    const ch = source[i];
+    if (ch === '"' || ch === "'" || ch === "`") {
+      i = skipString(source, i, ch);
+    } else if (ch === "/" && source[i + 1] === "/") {
+      const newline = source.indexOf("\n", i);
+      i = newline === -1 ? source.length : newline;
+    } else if (ch === "/" && source[i + 1] === "*") {
+      const commentEnd = source.indexOf("*/", i + 2);
+      i = commentEnd === -1 ? source.length : commentEnd + 1;
+    } else if (ch === "[") {
+      depth++;
+    } else if (ch === "]") {
+      depth--;
+      if (depth === 0) return i;
+    }
+  }
+  return -1;
+}
+
+/**
+ * Returns the index of the closing quote of the string literal starting at `start`.
+ * @param {string} source - File contents.
+ * @param {number} start - Index of the opening quote.
+ * @param {string} quote - The quote character.
+ * @returns {number} Index of the closing quote (or the end of the source).
+ */
+function skipString(source, start, quote) {
+  for (let i = start + 1; i < source.length; i++) {
+    if (source[i] === "\\") {
+      i++;
+    } else if (source[i] === quote) {
+      return i;
+    }
+  }
+  return source.length;
 }
 
 /**

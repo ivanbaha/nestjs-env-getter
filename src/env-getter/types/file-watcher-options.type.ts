@@ -15,10 +15,11 @@ export type FileWatcherOptions = {
   debounceMs?: number;
 
   /**
-   * Whether to stop the process on re-read errors.
-   * If true, any error during config file re-read will terminate the process.
-   * If false, errors will only emit 'error' events without stopping the process.
-   * @default true
+   * When `true`, a failed re-read of a watched file terminates the process after the
+   * error events have been emitted. A failed re-read means a read error, a JSON parse
+   * error, or a class-validation error. File deletion never triggers termination
+   * because delete-then-recreate is a supported rotation pattern.
+   * @default false
    */
   breakOnError?: boolean;
 };

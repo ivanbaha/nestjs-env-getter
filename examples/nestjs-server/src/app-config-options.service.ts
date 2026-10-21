@@ -1,55 +1,60 @@
 import { Injectable } from '@nestjs/common';
-import { FileWatcherOptions } from 'nestjs-env-getter';
+import { EnvGetterService, FileWatcherOptions } from 'nestjs-env-getter';
 
 @Injectable()
 export class AppConfigOptionsService {
+  // Inferred type: 'development' | 'staging' | 'production' | 'test' (GET-1 / EX-3)
+  private readonly environment: 'development' | 'staging' | 'production' | 'test';
+
+  constructor(private readonly envGetter: EnvGetterService) {
+    this.environment = this.envGetter.getOptionalEnv('NODE_ENV', 'development', [
+      'development',
+      'staging',
+      'production',
+      'test',
+    ]);
+  }
+
   /**
-   * Get the filename for mongo credentials config file.
-   * This could be determined by environment, deployment context, etc.
+   * Get the filename for mongo credentials config file (relative to `configBaseDir`, i.e. `configs/`).
    */
   getMongoCredentialsFilename(): string {
-    // This could be based on NODE_ENV, deployment stage, etc.
-    const environment = process.env.NODE_ENV || 'development';
-
-    switch (environment) {
+    switch (this.environment) {
       case 'production':
-        return 'configs/mongo-creds-prod.json';
+        return 'mongo-creds-prod.json';
       case 'staging':
-        return 'configs/mongo-creds-staging.json';
+        return 'mongo-creds-staging.json';
       case 'development':
+      case 'test':
       default:
-        return 'configs/mongo-creds.json';
+        return 'mongo-creds.json';
     }
   }
 
   /**
-   * Get the filename for test configurations.
+   * Get the filename for test configurations (relative to `configBaseDir`, i.e. `configs/`).
    */
   getTestConfigFilename(): string {
-    const environment = process.env.NODE_ENV || 'development';
-
-    if (environment === 'test') {
-      return 'configs/test-configs-test.json';
+    if (this.environment === 'test') {
+      return 'test-configs-test.json';
     }
 
-    return 'configs/test-configs.json';
+    return 'test-configs.json';
   }
 
   /**
    * Get configuration options that can be used by AppConfig.
    */
   getConfigOptions() {
-    const environment = process.env.NODE_ENV || 'development';
-
     return {
-      environment,
+      environment: this.environment,
       mongoCredentialsFile: this.getMongoCredentialsFilename(),
       testConfigFile: this.getTestConfigFilename(),
       fileWatcherOptions: {
-        enabled: environment !== 'production',
+        enabled: this.environment !== 'production',
         debounceMs: 200,
         breakOnError: false,
-      } as FileWatcherOptions,
+      } satisfies FileWatcherOptions,
     };
   }
 }

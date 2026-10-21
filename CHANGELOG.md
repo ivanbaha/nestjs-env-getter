@@ -7,6 +7,58 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0] - 2026-10-21
+
+### Security
+
+- **Dependency audit (dev and example dependencies only — the published package still has zero runtime dependencies):** Upgraded NestJS to `11.2.7` (root devDependencies and the example app), which brings `multer` `2.4.0`. Re-pinned vulnerable transitive packages to patched versions via `resolutions`: `brace-expansion` `5.0.12`, `js-yaml` `4.3.2`, `browserslist` `4.29.3`, `baseline-browser-mapping` `2.11.29`, `handlebars` `4.7.10`, plus `qs` `6.16.1` and `proxy-addr` `2.0.8` in the example. One advisory remains in both audits: `braces` (GHSA-vfj7-8cjw-p6xm, via `jest` → `micromatch`) has no patched release; it only processes the project's own test globs.
+
+### Behavior changes
+
+1. **The library no longer writes to the console.** The red line before each throw is gone. Synchronous failures throw `EnvValidationError`, with the same message, and it is still `instanceof Error`. Asynchronous watcher errors that nobody listens to go to Nest's `Logger.error` (ERR-1, ERR-3).
+2. **`breakOnError` defaults to `false`, and `true` now terminates the process** after a failed re-read, but never on deletion. Previously no setting ever terminated (BUG-5).
+3. **Watcher `error` event messages always start with `Cannot read config from file '<path>'.`** Previously the prefix depended on `breakOnError` (BUG-5).
+4. **The global `updated` and `error` events now fire.** They were documented but never emitted (BUG-1).
+5. **Config classes created by `AppConfigModule` report two or more errors as one aggregated `EnvValidationError`.** A single error is unchanged; opt out with `aggregateErrors: false`. Config classes are now created through a factory provider; lifecycle hooks are unaffected, and classes that need property injection, `forwardRef` or a non-default scope automatically keep the old path (MOD-5).
+6. **`.env` files load when `forRoot()` is called** (at module-definition time), not only when the service is constructed (MOD-4).
+7. **`forRootAsync({ useFactory })` without `inject` now receives `EnvGetterService` as its first argument** (MOD-1).
+8. **`AppConfigModule` and `EnvGetterModule` now share one `EnvGetterService`** when their options match or neither has options. Previously there were always two (MOD-1).
+9. **The `AppConfigModule` class is no longer decorated with `@Global()`.** The `forRoot` and `forRootAsync` modules are still global, and a bare `imports: [AppConfigModule]` was and remains a no-op (MOD-1).
+10. **`APP_CONFIG` now also resolves for `useClass` configs.** This is additive (MOD-1).
+11. **An optional config file that is malformed at startup now gets a watcher** and hot-reloads once it is fixed (BUG-4).
+
+### Added
+
+- **`EnvConfig` base class (AUTH-1):** `@Injectable()` abstract base class exposing `protected readonly envGetter: EnvGetterService` so config classes can declare inline field initializers with full TypeScript type inference (including under `target >= ES2022`).
+- **`EnvValidationError` & `EnvGetterService.collectErrors()` (ERR-1, ERR-2, MOD-5):** Structured validation error class with `errors: readonly string[]` and `scope?: string`, plus `collectErrors(build, scope?)` for synchronous multi-error collection and automatic aggregation in `AppConfigModule`.
+- **`AppConfigModule.forRoot(ConfigClass, envGetter?)` shorthand (MOD-1):** Pass the config class directly without `{ useClass }`.
+- **`AppConfigModule.forFeature(configs, options?)` (MOD-2):** Non-global, memoized feature-config registration for modular NestJS apps.
+- **`EnvGetterModuleOptions.env` & `AppConfigModule.forTesting()` (MOD-3):** Read environment variables from a live in-memory record and skip `.env` loading for isolated unit and integration testing.
+- **Literal union return types on `getRequiredEnv` & `getOptionalEnv` (GET-1):** Narrowed `<T extends string>` return types when `allowedValues: readonly T[]` is passed.
+- **`getOptionalObject` (GET-2):** Optional JSON object getter with optional default value and optional validation class.
+- **`getOptionalArray` (GET-3):** Optional JSON array getter with optional default array and element validator.
+- **`getOptionalCron(envName, defaultValue)` (GET-4):** Overload accepting a default cron expression string (validated on every call).
+- **`getRequiredList` & `getOptionalList` (GET-5):** Delimiter-separated list getters with configurable `separator`, whitespace trimming, strict empty-item rejection, and `allowedValues` literal union narrowing.
+- **Root barrel exports (BUG-6):** Exported `EnvConfig`, `EnvValidationError`, `isValidCronExpression`, `isTimePeriod`, `parseTimePeriod`, `AppConfigModuleRootOptions`, and `ListOptions` from the root entry point.
+
+### Changed
+
+- **Template & CLI (`nestjs-env-getter init`) (AUTH-2):** Updated `app.config.ts.example` to extend `EnvConfig` and updated the CLI module insertion to `AppConfigModule.forRoot(AppConfig)`.
+- **Example application overhaul (EX-1 – EX-7):** Removed MongoDB/Docker dependency in favor of `DatabaseConnectionService` (`/db/status`), migrated `AppConfig` and `TasksConfig` to `EnvConfig` and `forFeature`, eliminated raw `process.env` reads, and added unit and e2e test suites.
+- **Toolchain:** Bumped TypeScript to v7 (`7.0.2`) and removed ESLint.
+- **Exceptions thrown by `updated` listeners** are logged through Nest's `Logger` instead of being reported as a failed re-read; they no longer emit an `error` event or trigger `breakOnError` (the new config has already been applied at that point).
+
+### Fixed
+
+- **Global `updated` and `error` events on `envGetter.events` (BUG-1, ERR-3):** Both global and per-file events now fire, with `Logger.error` fallback when no error listener is attached.
+- **`getOptionalEnv(name, defaultValue, allowedValues)` return type (BUG-2):** Now typed as `T` (non-nullable) instead of `string | undefined`.
+- **Missing `getOptionalConfigFromFile(filePath, defaultValue, watcherOptions)` overloads (BUG-3):** Added public TypeScript overloads matching runtime support.
+- **Watcher setup for optional config files malformed at startup (BUG-4):** Now caches object defaults, attaches event methods, and installs the file watcher so fixing the file later hot-reloads in place.
+- **`breakOnError` watcher termination and consistent error prefix (BUG-5):** Default flipped to `false`; when `true`, a failed re-read terminates after emitting error events (never on file deletion), and error event messages consistently start with `Cannot read config from file '<path>'.`.
+- **Documented `CronSchedule.getPrevTime()` in README (BUG-7).**
+- **`nestjs-env-getter init` CLI:** now finds the bracket that actually closes the `imports` array, so it handles the default Nest scaffold (`imports: [],` on one line), one-line arrays, and nested arrays or brackets inside strings and comments (previously it either failed on one-line arrays or inserted a line break inside nested ones such as `forFeature([User])`).
+- **`getOptionalArray` validator-misuse message** now names `getOptionalArray` instead of `getRequiredArray`.
+
 ## [1.2.0] - 2026-06-30
 
 ### Security
